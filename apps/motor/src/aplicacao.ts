@@ -133,8 +133,11 @@ export async function criarAplicacao(
     return [...new Set([...monitoradas.map((carteira) => carteira.endereco), ...motor.carteirasEmUso()])]
   }
 
+  let quantidadeMonitorada = 0
   const sincronizarMonitor = async () => {
-    fonte?.atualizarCarteiras(await carteirasParaMonitorar())
+    const carteiras = await carteirasParaMonitorar()
+    quantidadeMonitorada = carteiras.length
+    fonte?.atualizarCarteiras(carteiras)
   }
 
   const garantirCarteiras = async (enderecos: string[]) => {
@@ -161,7 +164,7 @@ export async function criarAplicacao(
       monitor: {
         fonte: configuracao.FONTE_DE_TRANSACOES,
         conectada: fonte?.conectada ?? false,
-        carteiras: motor.carteirasEmUso().size,
+        carteiras: quantidadeMonitorada,
       },
       executorSimulado: configuracao.EXECUTOR_SIMULADO,
       sessoesAtivas: motor.quantidadeDeSessoesAtivas(),

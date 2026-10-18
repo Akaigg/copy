@@ -18,7 +18,7 @@ function tokenDaRequisicao(cabecalho: string | undefined, consulta: unknown) {
 }
 
 export async function criarServidor(contexto: ContextoDaApi): Promise<FastifyInstance> {
-  const servidor = Fastify({ disableRequestLogging: true, logger: false })
+  const servidor = Fastify({ logger: false })
   await servidor.register(fastifyWebsocket)
 
   servidor.addHook('onRequest', async (requisicao, resposta) => {

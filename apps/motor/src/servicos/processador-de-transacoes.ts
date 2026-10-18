@@ -28,6 +28,8 @@ export interface DependenciasDoProcessador {
 
 const LIMITE_DE_RECUPERACAO = 100
 const MEMORIA_DE_ASSINATURAS = 5000
+const TENTATIVAS_DE_BUSCA = 4
+const ESPERA_ENTRE_BUSCAS_MS = 5000
 
 export class ProcessadorDeTransacoes {
   private readonly filas = new FilaSerial()
@@ -37,17 +39,17 @@ export class ProcessadorDeTransacoes {
 
   constructor(private readonly dependencias: DependenciasDoProcessador) {}
 
-  receber(notificacao: NotificacaoDeTransacao) {
+  receber(notificacao: NotificacaoDeTransacao, tentativa = 1): Promise<unknown> {
     const transacao = notificacao.transacao
       ? Promise.resolve(notificacao.transacao)
-      : this.buscarTransacao(notificacao.assinatura)
-    transacao.catch(() => undefined)
+      : this.buscarTransacao(notificacao.assinatura).catch(() => null)
     const tarefas = notificacao.carteiras
       .filter((carteira) => this.marcarComoVista(`${notificacao.assinatura}:${carteira}`))
       .map((carteira) =>
         this.filas.executar(carteira, async () => {
           const normalizada = await transacao
-          if (normalizada) await this.aplicarTransacao(carteira, normalizada, notificacao.recebidaEm, false)
+          if (normalizada) return this.aplicarTransacao(carteira, normalizada, notificacao.recebidaEm, false)
+          this.reagendar({ ...notificacao, carteiras: [carteira] }, tentativa)
         }),
       )
     return Promise.all(tarefas).catch((erro) =>
@@ -56,6 +58,19 @@ export class ProcessadorDeTransacoes {
         'Falha ao processar transação',
       ),
     )
+  }
+
+  private reagendar(notificacao: NotificacaoDeTransacao, tentativa: number) {
+    for (const carteira of notificacao.carteiras)
+      this.assinaturasRecentes.delete(`${notificacao.assinatura}:${carteira}`)
+    if (tentativa >= TENTATIVAS_DE_BUSCA) {
+      this.dependencias.registro.error(
+        { assinatura: notificacao.assinatura },
+        'Transação descartada após novas tentativas',
+      )
+      return
+    }
+    setTimeout(() => void this.receber(notificacao, tentativa + 1), ESPERA_ENTRE_BUSCAS_MS * tentativa)
   }
 
   recuperarLacunas(carteira: string) {

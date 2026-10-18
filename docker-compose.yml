@@ -1,0 +1,15 @@
+services:
+  banco:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hot
+      POSTGRES_PASSWORD: hot
+      POSTGRES_DB: hot_crypto_ai
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - dados_postgres:/var/lib/postgresql/data
+
+volumes:
+  dados_postgres:

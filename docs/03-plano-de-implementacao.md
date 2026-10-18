@@ -12,6 +12,17 @@ Fase 5  Operação real
 Fase 6  Evolução contínua
 ```
 
+## Situação
+
+| Fase | Situação |
+|---|---|
+| 0 — Fundação | Concluída |
+| 1 — Observação em tempo real | Concluída |
+| 2 — Cópia simulada | Concluída |
+| 3 — Estratégias e comparação | Concluída, exceto o replay histórico |
+| 4 — Descoberta e IA | Próxima etapa |
+| 5 — Operação real | Planejada |
+
 ---
 
 ## Fase 0 — Fundação

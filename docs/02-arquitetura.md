@@ -241,7 +241,7 @@ Componente que alimenta o motor de cópia com operações de origem já registra
 
 ## Modelo de dados
 
-Tabelas principais (nomes finais definidos na implementação):
+Tabelas principais:
 
 | Tabela | Conteúdo |
 |---|---|
@@ -252,8 +252,7 @@ Tabelas principais (nomes finais definidos na implementação):
 | `sessoes` | Nome, modo (`simulado`, `real`), capital inicial, estratégia, configuração da estratégia, dimensionamento, limites, status |
 | `carteiras_da_sessao` | Carteiras selecionadas para a sessão, ordem na fila e fração de capital configurada |
 | `decisoes_estrategia` | Sessão, horário, carteiras ativas, estado da estratégia, motivo |
-| `ordens_copia` | Sessão, operação de origem, tipo, valor alvo, status (`pendente`, `executada`, `falhou`, `nao_copiada`, `bloqueada`), motivo, chave de idempotência única |
-| `execucoes` | Ordem, assinatura, preço, quantidade, taxas, latências, desvio de preço |
+| `ordens_copia` | Sessão, operação de origem, tipo, valor alvo, status (`pendente`, `executada`, `falhou`, `nao_copiada`), motivo, chave de idempotência única e dados da execução: assinatura, preço, quantidade, taxas, latência e desvio de preço |
 | `posicoes_copia` | Sessão, carteira de origem, token, ciclo de origem, quantidade, custo, resultado realizado |
 | `metricas_carteira` | Carteira, data de cálculo, métricas, pontuação, copiabilidade |
 | `relatorios_ia` | Assunto (carteira, sessão, comparação), conteúdo, dados de entrada utilizados |

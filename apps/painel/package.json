@@ -1,0 +1,30 @@
+{
+  "name": "@hot/painel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "construir": "vite build",
+    "tipos": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hot/compartilhado": "workspace:*",
+    "@hot/dominio": "workspace:*",
+    "@tanstack/react-query": "^5.104.4",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.59.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router": "^8.4.0",
+    "recharts": "^3.10.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.4"
+  }
+}
