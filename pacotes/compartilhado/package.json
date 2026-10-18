@@ -1,0 +1,16 @@
+{
+  "name": "@hot/compartilhado",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "tipos": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hot/dominio": "workspace:*",
+    "zod": "^4.6.7"
+  }
+}

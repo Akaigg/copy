@@ -1,0 +1,1061 @@
+{
+  "id": "b3b00c7c-c6ab-4815-8f6d-5192e0bb14fb",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.carteiras": {
+      "name": "carteiras",
+      "schema": "",
+      "columns": {
+        "endereco": {
+          "name": "endereco",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "apelido": {
+          "name": "apelido",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'monitorada'"
+        },
+        "origem": {
+          "name": "origem",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "etiquetas": {
+          "name": "etiquetas",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "observacoes": {
+          "name": "observacoes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ultima_assinatura": {
+          "name": "ultima_assinatura",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criada_em": {
+          "name": "criada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.carteiras_da_sessao": {
+      "name": "carteiras_da_sessao",
+      "schema": "",
+      "columns": {
+        "sessao_id": {
+          "name": "sessao_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "endereco": {
+          "name": "endereco",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fracao_do_capital": {
+          "name": "fracao_do_capital",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ordem": {
+          "name": "ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "carteiras_da_sessao_sessao_id_endereco_pk": {
+          "name": "carteiras_da_sessao_sessao_id_endereco_pk",
+          "columns": [
+            "sessao_id",
+            "endereco"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.ciclos_origem": {
+      "name": "ciclos_origem",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "carteira": {
+          "name": "carteira",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "aberto_em": {
+          "name": "aberto_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "encerrado_em": {
+          "name": "encerrado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quantidade": {
+          "name": "quantidade",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "custo_base_sol": {
+          "name": "custo_base_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "investido_sol": {
+          "name": "investido_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retornado_sol": {
+          "name": "retornado_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resultado_realizado_sol": {
+          "name": "resultado_realizado_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantidade_de_compras": {
+          "name": "quantidade_de_compras",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantidade_de_vendas": {
+          "name": "quantidade_de_vendas",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "teve_transferencias": {
+          "name": "teve_transferencias",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "ciclos_origem_carteira": {
+          "name": "ciclos_origem_carteira",
+          "columns": [
+            {
+              "expression": "carteira",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "encerrado_em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ciclos_origem_aberto_unico": {
+          "name": "ciclos_origem_aberto_unico",
+          "columns": [
+            {
+              "expression": "carteira",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "token",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "status = 'aberto'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.decisoes_estrategia": {
+      "name": "decisoes_estrategia",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sessao_id": {
+          "name": "sessao_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "momento": {
+          "name": "momento",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "carteiras_ativas": {
+          "name": "carteiras_ativas",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "motivo": {
+          "name": "motivo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "decisoes_estrategia_sessao": {
+          "name": "decisoes_estrategia_sessao",
+          "columns": [
+            {
+              "expression": "sessao_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "momento",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.eventos_auditoria": {
+      "name": "eventos_auditoria",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "momento": {
+          "name": "momento",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "descricao": {
+          "name": "descricao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dados": {
+          "name": "dados",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.operacoes_origem": {
+      "name": "operacoes_origem",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "assinatura": {
+          "name": "assinatura",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "carteira": {
+          "name": "carteira",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantidade_token": {
+          "name": "quantidade_token",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decimais": {
+          "name": "decimais",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_sol": {
+          "name": "valor_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "preco_sol": {
+          "name": "preco_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "saldo_token_antes": {
+          "name": "saldo_token_antes",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "saldo_token_depois": {
+          "name": "saldo_token_depois",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "saldo_sol_antes": {
+          "name": "saldo_sol_antes",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "plataforma": {
+          "name": "plataforma",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "slot": {
+          "name": "slot",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "horario_do_bloco": {
+          "name": "horario_do_bloco",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "horario_de_deteccao": {
+          "name": "horario_de_deteccao",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ciclo_id": {
+          "name": "ciclo_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "efeito_no_ciclo": {
+          "name": "efeito_no_ciclo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "historica": {
+          "name": "historica",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {
+        "operacoes_origem_carteira_horario": {
+          "name": "operacoes_origem_carteira_horario",
+          "columns": [
+            {
+              "expression": "carteira",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "horario_do_bloco",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operacoes_origem_horario": {
+          "name": "operacoes_origem_horario",
+          "columns": [
+            {
+              "expression": "horario_do_bloco",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "operacoes_origem_ciclo": {
+          "name": "operacoes_origem_ciclo",
+          "columns": [
+            {
+              "expression": "ciclo_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.ordens_copia": {
+      "name": "ordens_copia",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sessao_id": {
+          "name": "sessao_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operacao_de_origem_id": {
+          "name": "operacao_de_origem_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "carteira": {
+          "name": "carteira",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lado": {
+          "name": "lado",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "motivo": {
+          "name": "motivo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "posicao_id": {
+          "name": "posicao_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_alvo_sol": {
+          "name": "valor_alvo_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fracao_alvo": {
+          "name": "fracao_alvo",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "preco_do_trader_sol": {
+          "name": "preco_do_trader_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "horario_do_bloco_de_origem": {
+          "name": "horario_do_bloco_de_origem",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criada_em": {
+          "name": "criada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tentativas": {
+          "name": "tentativas",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantidade_executada": {
+          "name": "quantidade_executada",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_executado_sol": {
+          "name": "valor_executado_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "preco_executado_sol": {
+          "name": "preco_executado_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "taxas_sol": {
+          "name": "taxas_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "assinatura": {
+          "name": "assinatura",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fonte_do_preco": {
+          "name": "fonte_do_preco",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "executada_em": {
+          "name": "executada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "latencia_ms": {
+          "name": "latencia_ms",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "desvio_de_preco": {
+          "name": "desvio_de_preco",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "ordens_copia_idempotencia": {
+          "name": "ordens_copia_idempotencia",
+          "columns": [
+            {
+              "expression": "sessao_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "operacao_de_origem_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ordens_copia_sessao": {
+          "name": "ordens_copia_sessao",
+          "columns": [
+            {
+              "expression": "sessao_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "criada_em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.posicoes_copia": {
+      "name": "posicoes_copia",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "sessao_id": {
+          "name": "sessao_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "carteira": {
+          "name": "carteira",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decimais": {
+          "name": "decimais",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ciclo_de_origem_id": {
+          "name": "ciclo_de_origem_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantidade": {
+          "name": "quantidade",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "custo_base_sol": {
+          "name": "custo_base_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "investido_sol": {
+          "name": "investido_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "retornado_sol": {
+          "name": "retornado_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resultado_realizado_sol": {
+          "name": "resultado_realizado_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "taxas_sol": {
+          "name": "taxas_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_entrada_trader_sol": {
+          "name": "valor_entrada_trader_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_entrada_robo_sol": {
+          "name": "valor_entrada_robo_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "aberta_em": {
+          "name": "aberta_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "encerrada_em": {
+          "name": "encerrada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "posicoes_copia_sessao": {
+          "name": "posicoes_copia_sessao",
+          "columns": [
+            {
+              "expression": "sessao_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sessoes": {
+      "name": "sessoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "modo": {
+          "name": "modo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "capital_inicial_sol": {
+          "name": "capital_inicial_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "caixa_sol": {
+          "name": "caixa_sol",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estrategia_identificador": {
+          "name": "estrategia_identificador",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estrategia_configuracao": {
+          "name": "estrategia_configuracao",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estrategia_estado": {
+          "name": "estrategia_estado",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "carteiras_ativas": {
+          "name": "carteiras_ativas",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dimensionamento": {
+          "name": "dimensionamento",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "limites": {
+          "name": "limites",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "regras": {
+          "name": "regras",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criada_em": {
+          "name": "criada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "iniciada_em": {
+          "name": "iniciada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "encerrada_em": {
+          "name": "encerrada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tokens": {
+      "name": "tokens",
+      "schema": "",
+      "columns": {
+        "mint": {
+          "name": "mint",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "simbolo": {
+          "name": "simbolo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "icone": {
+          "name": "icone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decimais": {
+          "name": "decimais",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "primeira_vez_visto_em": {
+          "name": "primeira_vez_visto_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

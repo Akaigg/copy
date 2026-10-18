@@ -1,0 +1,19 @@
+{
+  "name": "@hot/solana",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "tipos": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hot/dominio": "workspace:*",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
+  }
+}

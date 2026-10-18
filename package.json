@@ -1,0 +1,26 @@
+{
+  "name": "hot-crypto-ai",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @hot/motor --filter @hot/painel dev",
+    "motor": "pnpm --filter @hot/motor iniciar",
+    "painel": "pnpm --filter @hot/painel dev",
+    "construir": "pnpm --filter @hot/painel construir",
+    "verificar": "biome check . && pnpm -r tipos",
+    "formatar": "biome check --write .",
+    "testar": "vitest run",
+    "banco:gerar": "pnpm --filter @hot/banco gerar"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
