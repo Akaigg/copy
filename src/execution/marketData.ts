@@ -1,6 +1,7 @@
 import type { Logger } from "../core/logger.js";
 import { Priority } from "../core/rateLimiter.js";
 import type { TokenSnapshot } from "../core/types.js";
+import { parseCandles, type Candle } from "../filters/kline.js";
 import { errMsg, first, num, SOL_MINT } from "../core/utils.js";
 import type { GmgnClient } from "../gmgn/client.js";
 import { fromSecurity, fromTokenInfo } from "../scanner/normalize.js";
@@ -12,6 +13,16 @@ export interface MarketData extends PriceOracle {
   refresh(addresses: string[], now: number): Promise<Map<string, TokenSnapshot>>;
   /** Dados de segurança frescos. undefined = indisponível. */
   security(address: string): Promise<Partial<TokenSnapshot> | undefined>;
+  /** Histórico do dev (tokens criados / graduados / maior ATH). */
+  devHistory?(creator: string): Promise<DevHistory | undefined>;
+  /** Candles de 1 minuto da última hora. */
+  kline?(address: string, now: number): Promise<Candle[] | undefined>;
+}
+
+export interface DevHistory {
+  created: number;
+  graduated: number;
+  athMcUsd?: number;
 }
 
 export class GmgnMarketData implements MarketData {
@@ -53,6 +64,27 @@ export class GmgnMarketData implements MarketData {
       }),
     );
     return out;
+  }
+
+  async devHistory(creator: string): Promise<DevHistory | undefined> {
+    try {
+      const d = await this.client.getCreatedTokens(this.chain, creator);
+      const inner = num(d["inner_count"]) ?? 0;
+      const open = num(d["open_count"]) ?? 0;
+      return { created: inner + open, graduated: open, athMcUsd: num(first(d, "creator_ath_info.ath_mc")) };
+    } catch (e) {
+      this.log.debug(`created_tokens ${creator}: ${errMsg(e)}`);
+      return undefined;
+    }
+  }
+
+  async kline(address: string, now: number): Promise<Candle[] | undefined> {
+    try {
+      return parseCandles(await this.client.getKline(this.chain, address, "1m", now - 3_600_000, now));
+    } catch (e) {
+      this.log.debug(`kline ${address}: ${errMsg(e)}`);
+      return undefined;
+    }
   }
 
   async security(address: string): Promise<Partial<TokenSnapshot> | undefined> {

@@ -56,6 +56,11 @@ function common(r: Raw): Omit<TokenSnapshot, "address" | "symbol" | "sources" | 
     twitter,
     website,
     telegram,
+    freshWalletRate: num(first(r, "fresh_wallet_rate", "stat.fresh_wallet_rate")),
+    botDegenRate: num(first(r, "bot_degen_rate", "stat.top_bot_degen_percentage")),
+    athMarketCapUsd: num(first(r, "history_highest_market_cap", "ath_mc")),
+    devCreatedCount: num(first(r, "creator_created_count", "dev.creator_created_count")),
+    devGraduatedCount: num(first(r, "creator_created_open_count", "dev.creator_created_open_count")),
   };
 }
 
@@ -80,6 +85,7 @@ export function fromTrenches(r: Raw, category: string, now: number): TokenSnapsh
     stage: TRENCH_STAGE[category] ?? "unknown",
     marketCapUsd: mcap,
     priceUsd: priceFrom(r, mcap),
+    priceAt: now,
     volume1hUsd: num(r["volume_1h"]),
     volume24hUsd: num(r["volume_24h"]),
     swaps1m: num(r["swaps_1m"]),
@@ -105,6 +111,7 @@ export function fromRank(r: Raw, interval: "1m" | "5m" | "1h" | "6h" | "24h", no
     stage: openAt ? "migrated" : c.progress !== undefined && c.progress >= 0.85 ? "near" : "unknown",
     marketCapUsd: mcap,
     priceUsd: priceFrom(r, mcap),
+    priceAt: now,
     volumeByInterval: volume !== undefined ? { [interval]: volume } : undefined,
     volume1hUsd: interval === "1h" ? volume : undefined,
     volume24hUsd: interval === "24h" ? volume : undefined,
@@ -137,6 +144,7 @@ export function fromTokenInfo(r: Raw, now: number): TokenSnapshot | null {
     stage: status === 2 ? "migrated" : status === 1 ? "curve" : "unknown",
     progress: num(r["launchpad_progress"]),
     priceUsd: price,
+    priceAt: now,
     marketCapUsd: price !== undefined && supply ? price * supply : undefined,
     volume1hUsd: num(first(r, "price.volume_1h")),
     volume24hUsd: num(first(r, "price.volume_24h")),
@@ -145,6 +153,8 @@ export function fromTokenInfo(r: Raw, now: number): TokenSnapshot | null {
     buys: num(first(r, "price.buys_1h")),
     sells: num(first(r, "price.sells_1h")),
     hotLevel: num(first(r, "price.hot_level")),
+    buyVolume5mUsd: num(first(r, "price.buy_volume_5m")),
+    sellVolume5mUsd: num(first(r, "price.sell_volume_5m")),
     priceChange1mPct: price !== undefined && p1m ? pct(p1m, price) : undefined,
     priceChange5mPct: price !== undefined && p5m ? pct(p5m, price) : undefined,
     priceChange1hPct: price !== undefined && p1h ? pct(p1h, price) : undefined,
@@ -171,10 +181,58 @@ export function fromSecurity(r: Raw): Partial<TokenSnapshot> {
     "sellTax",
     "creatorClosed",
     "creator",
+    "freshWalletRate",
+    "botDegenRate",
   ] as const) {
     if (c[k] !== undefined) (out as Record<string, unknown>)[k] = c[k];
   }
   return out;
+}
+
+/**
+ * /v1/market/token_signal: um item por evento. Agrega por token (contagem por tipo,
+ * mcap no primeiro sinal, horário do último). Itens não trazem preço — o scanner
+ * completa com token/info quando necessário.
+ */
+export function fromSignals(items: Raw[], now: number): TokenSnapshot[] {
+  const by = new Map<string, TokenSnapshot>();
+  for (const it of items) {
+    const address = str(first(it, "token_address", "address"));
+    if (!address) continue;
+    const type = String(num(it["signal_type"]) ?? "?");
+    const triggerAt = tsMs(it["trigger_at"]);
+    const prev = by.get(address);
+    const counts: Record<string, number> = { ...(prev?.signalCounts ?? {}) };
+    const byType = it["signal_times_by_type"];
+    if (byType && typeof byType === "object") {
+      for (const [k, v] of Object.entries(byType as Record<string, unknown>)) {
+        const n = num(v);
+        if (n !== undefined) counts[k] = Math.max(counts[k] ?? 0, n);
+      }
+    }
+    counts[type] = Math.max(counts[type] ?? 0, 1);
+    const firstMc = num(first(it, "first_trigger_mc", "trigger_mc"));
+    const snap: TokenSnapshot = {
+      ...(prev ?? { address, symbol: str(first(it, "symbol", "data.symbol")) ?? "?", sources: ["signal"], observedAt: now, stage: "unknown" }),
+      marketCapUsd: num(it["market_cap"]) ?? prev?.marketCapUsd,
+      athMarketCapUsd: num(it["ath"]) ?? prev?.athMarketCapUsd,
+      holderCount: num(first(it, "cur_data.holder_count")) ?? prev?.holderCount,
+      liquidityUsd: num(first(it, "cur_data.liquidity")) ?? prev?.liquidityUsd,
+      top10HolderRate: num(first(it, "cur_data.top_10_holder_rate")) ?? prev?.top10HolderRate,
+      signalCounts: counts,
+      firstSignalMcUsd:
+        firstMc !== undefined ? Math.min(firstMc, prev?.firstSignalMcUsd ?? Infinity) : prev?.firstSignalMcUsd,
+      lastSignalAt: Math.max(triggerAt ?? 0, prev?.lastSignalAt ?? 0) || undefined,
+    };
+    by.set(address, snap);
+  }
+  return [...by.values()];
+}
+
+/** Total de disparos dos tipos pedidos. */
+export function signalCount(s: TokenSnapshot, types: number[]): number {
+  if (!s.signalCounts) return 0;
+  return types.reduce((acc, t) => acc + (s.signalCounts?.[String(t)] ?? 0), 0);
 }
 
 /** Junta dois snapshots do mesmo token: valores definidos de `b` prevalecem. */
@@ -184,6 +242,15 @@ export function mergeSnapshots(a: TokenSnapshot, b: Partial<TokenSnapshot>): Tok
     if (v === undefined) continue;
     if (k === "sources") {
       out.sources = Array.from(new Set([...a.sources, ...(v as Source[])]));
+    } else if (k === "priceAt") {
+      // Só vale se este snapshot trouxe preço de fato.
+      if (b.priceUsd !== undefined) out.priceAt = v as number;
+    } else if (k === "signalCounts") {
+      const merged: Record<string, number> = { ...(a.signalCounts ?? {}) };
+      for (const [t, n] of Object.entries(v as Record<string, number>)) merged[t] = Math.max(merged[t] ?? 0, n);
+      out.signalCounts = merged;
+    } else if (k === "firstSignalMcUsd") {
+      out.firstSignalMcUsd = Math.min(a.firstSignalMcUsd ?? Infinity, v as number);
     } else if (k === "volumeByInterval") {
       out.volumeByInterval = { ...(a.volumeByInterval ?? {}), ...(v as object) };
     } else if (k === "stage") {

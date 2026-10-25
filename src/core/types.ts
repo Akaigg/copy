@@ -9,6 +9,7 @@ export type Source =
   | "rank:1h"
   | "rank:6h"
   | "rank:24h"
+  | "signal"
   | "info";
 
 /** Estágio do token no ciclo de vida de um launchpad. */
@@ -31,6 +32,8 @@ export interface TokenSnapshot {
   progress?: number;
 
   priceUsd?: number;
+  /** Quando `priceUsd` foi observado (ms) — para não comprar com preço velho. */
+  priceAt?: number;
   marketCapUsd?: number;
   liquidityUsd?: number;
   holderCount?: number;
@@ -73,6 +76,24 @@ export interface TokenSnapshot {
   twitter?: string;
   website?: string;
   telegram?: string;
+
+  /** Carteiras recém-criadas entre os holders (0–1). */
+  freshWalletRate?: number;
+  /** Carteiras-robô (0–1). */
+  botDegenRate?: number;
+  /** Maior market cap histórico (USD). */
+  athMarketCapUsd?: number;
+  /** Histórico do dev: total de tokens criados e quantos graduaram. */
+  devCreatedCount?: number;
+  devGraduatedCount?: number;
+  /** Fluxo comprador/vendedor em USD na janela de 5 min (token/info). */
+  buyVolume5mUsd?: number;
+  sellVolume5mUsd?: number;
+
+  /** Feed de sinais da GMGN: disparos por tipo, mcap no 1º sinal e horário do último. */
+  signalCounts?: Record<string, number>;
+  firstSignalMcUsd?: number;
+  lastSignalAt?: number;
 }
 
 export interface TokenContext {

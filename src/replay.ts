@@ -67,7 +67,7 @@ class ReplayFeed implements Scanner, MarketData {
     const out = new Map<string, TokenSnapshot>();
     for (const a of addresses) {
       const s = this.latest.get(a);
-      if (s?.priceUsd) out.set(a, { ...s, observedAt: now });
+      if (s?.priceUsd) out.set(a, { ...s, observedAt: now, priceAt: now });
     }
     return out;
   }

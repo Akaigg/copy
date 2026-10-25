@@ -36,11 +36,12 @@ export function decideExit(p: Position, price: number, now: number, cfg: ExitCon
     return all(breakEven ? `break-even stop (${gainPct.toFixed(1)}%)` : `stop loss (${gainPct.toFixed(1)}%)`);
   }
 
-  // 2. Trailing stop
+  // 2. Trailing stop (com folga crescente conforme o lucro)
   if (cfg.trailing.enabled && peakGainPct >= cfg.trailing.activateAtPct) {
-    const trailPrice = peak * (1 - cfg.trailing.drawdownPct / 100);
+    const drawdown = trailingDrawdown(cfg, peakGainPct);
+    const trailPrice = peak * (1 - drawdown / 100);
     if (price <= trailPrice) {
-      return all(`trailing stop (pico +${peakGainPct.toFixed(0)}%, agora ${gainPct.toFixed(1)}%)`);
+      return all(`trailing stop ${drawdown}% (pico +${peakGainPct.toFixed(0)}%, agora ${gainPct.toFixed(1)}%)`);
     }
   }
 
@@ -66,9 +67,10 @@ export function decideExit(p: Position, price: number, now: number, cfg: ExitCon
     }
   }
 
-  // 4. Tempo
+  // 4. Tempo (o moonbag, depois de um take profit, pode ter um prazo maior)
   const heldMin = (now - p.openedAt) / 60_000;
-  if (cfg.maxHoldMin > 0 && heldMin >= cfg.maxHoldMin) return all(`tempo máximo ${cfg.maxHoldMin}min (${gainPct.toFixed(1)}%)`);
+  const maxHold = p.tpHits.length && cfg.maxHoldAfterTpMin > 0 ? cfg.maxHoldAfterTpMin : cfg.maxHoldMin;
+  if (maxHold > 0 && heldMin >= maxHold) return all(`tempo máximo ${maxHold}min (${gainPct.toFixed(1)}%)`);
   if (cfg.staleAfterMin > 0 && heldMin >= cfg.staleAfterMin && peakGainPct < cfg.staleMinGainPct) {
     return all(`posição parada ${cfg.staleAfterMin}min (${gainPct.toFixed(1)}%)`);
   }
@@ -85,4 +87,17 @@ export function trackPrice(p: Position, price: number, now: number, cfg: ExitCon
     const peakGain = ((p.highestPriceUsd - p.entryPriceUsd) / p.entryPriceUsd) * 100;
     if (peakGain >= cfg.breakEvenAtPct) p.breakEvenArmed = true;
   }
+}
+
+/** Drawdown do trailing para o lucro de pico atual (usa o maior degrau atingido). */
+export function trailingDrawdown(cfg: ExitConfig, peakGainPct: number): number {
+  let dd = cfg.trailing.drawdownPct;
+  let best = -Infinity;
+  for (const t of cfg.trailing.tiers) {
+    if (peakGainPct >= t.atPct && t.atPct > best) {
+      best = t.atPct;
+      dd = t.drawdownPct;
+    }
+  }
+  return dd;
 }

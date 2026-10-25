@@ -15,6 +15,8 @@ export interface LoadedConfig {
   config: Config;
   secrets: Secrets;
   path?: string;
+  /** Chaves do YAML que não existem no esquema (provável erro de digitação — são ignoradas). */
+  unknownKeys: string[];
 }
 
 export const DEFAULT_CONFIG_PATHS = ["config/config.yaml", "config/config.yml", "config.yaml"];
@@ -29,7 +31,7 @@ export function loadConfig(path?: string, overrides: Partial<Config> = {}): Load
   for (const p of candidates) {
     const abs = resolve(p);
     if (existsSync(abs)) {
-      raw = parseYaml(readFileSync(abs, "utf8")) ?? {};
+      raw = parseYaml(readFileSync(abs, "utf8"), { merge: true }) ?? {};
       usedPath = abs;
       break;
     }
@@ -42,7 +44,7 @@ export function loadConfig(path?: string, overrides: Partial<Config> = {}): Load
     const issues = parsed.error.issues.map((i) => `  - ${i.path.join(".")}: ${i.message}`).join("\n");
     throw new Error(`Configuração inválida:\n${issues}`);
   }
-  return { config: parsed.data, secrets: loadSecrets(), path: usedPath };
+  return { config: parsed.data, secrets: loadSecrets(), path: usedPath, unknownKeys: unknownKeys(raw, parsed.data) };
 }
 
 export function loadSecrets(): Secrets {
@@ -90,4 +92,16 @@ function deepMerge(a: Record<string, unknown>, b: Record<string, unknown>): Reco
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/** Lista caminhos presentes no YAML que o esquema descartou. */
+export function unknownKeys(raw: unknown, parsed: unknown, prefix = ""): string[] {
+  if (!isPlainObject(raw) || !isPlainObject(parsed)) return [];
+  const out: string[] = [];
+  for (const [k, v] of Object.entries(raw)) {
+    const path = prefix ? `${prefix}.${k}` : k;
+    if (!(k in parsed)) out.push(path);
+    else out.push(...unknownKeys(v, parsed[k], path));
+  }
+  return out;
 }

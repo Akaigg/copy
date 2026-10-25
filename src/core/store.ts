@@ -36,6 +36,22 @@ export interface BotState {
   recentBuys: number[];
   pendingBuys: PendingBuy[];
   totals: { realizedPnlSol: number; wins: number; losses: number; trades: number };
+  /** Patrimônio = saldo + valor das posições abertas (atualizado pelo motor). */
+  equity: EquityState;
+}
+
+export interface EquityState {
+  lastSol: number;
+  lastUsd: number;
+  peakSol: number;
+  dayStartSol: number;
+  dayDate: string;
+  updatedAt: number;
+  goalReachedAt?: number;
+  /** Meta/piso vigentes quando foram atingidos (mudar o config reabre as compras). */
+  goalTargetUsd?: number;
+  floorHitAt?: number;
+  floorUsd?: number;
 }
 
 function emptyDaily(now = Date.now()): DailyStats {
@@ -85,12 +101,19 @@ export class StateStore {
       recentBuys: [],
       pendingBuys: [],
       totals: { realizedPnlSol: 0, wins: 0, losses: 0, trades: 0 },
+      equity: { lastSol: 0, lastUsd: 0, peakSol: 0, dayStartSol: 0, dayDate: "", updatedAt: 0 },
     };
     for (const p of [this.statePath, this.statePath + ".bak"]) {
       if (!existsSync(p)) continue;
       try {
         const loaded = JSON.parse(readFileSync(p, "utf8")) as Partial<BotState>;
-        return { ...fresh, ...loaded, mode, totals: { ...fresh.totals, ...(loaded.totals ?? {}) } };
+        return {
+          ...fresh,
+          ...loaded,
+          mode,
+          totals: { ...fresh.totals, ...(loaded.totals ?? {}) },
+          equity: { ...fresh.equity, ...(loaded.equity ?? {}) },
+        };
       } catch {
         // arquivo corrompido: tenta o backup
       }

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import type { Config } from "../config/schema.js";
 import type { Logger } from "../core/logger.js";
+import { localDate } from "../core/logger.js";
 import type { StateStore } from "../core/store.js";
 import type { Position, Signal } from "../core/types.js";
 
@@ -31,9 +32,60 @@ export class RiskManager {
     if (existsSync(STOP_FILE)) return `arquivo ${STOP_FILE} presente (kill switch)`;
     if (st.manualPause) return "pausado manualmente";
     if (st.pausedUntil > now) return `pausa por perdas até ${new Date(st.pausedUntil).toLocaleTimeString()}`;
-    if (st.daily.realizedPnlSol <= -r.dailyLossLimitSol) return `limite de perda diária atingido (${st.daily.realizedPnlSol.toFixed(4)} SOL)`;
+    const limit = this.dailyLossLimitSol();
+    if (st.daily.realizedPnlSol <= -limit) return `limite de perda diária atingido (${st.daily.realizedPnlSol.toFixed(4)} / -${limit.toFixed(4)} SOL)`;
     if (r.dailyProfitTargetSol > 0 && st.daily.realizedPnlSol >= r.dailyProfitTargetSol) return "meta de lucro diária atingida";
+    if (st.equity.goalReachedAt !== undefined) return `META ATINGIDA ($${st.equity.lastUsd.toFixed(0)}) — compras encerradas; ajuste goal.targetUsd para continuar`;
+    if (st.equity.floorHitAt !== undefined) return `patrimônio abaixo do piso ($${st.equity.lastUsd.toFixed(0)} < $${r.goal.floorUsd}) — compras encerradas`;
     return null;
+  }
+
+  /** Limite de perda diária efetivo (o menor entre o fixo e o % do patrimônio do início do dia). */
+  dailyLossLimitSol(): number {
+    const r = this.cfg.risk;
+    const eq = this.store.state.equity;
+    if (r.dailyLossLimitPctOfEquity > 0 && eq.dayStartSol > 0) {
+      return Math.min(r.dailyLossLimitSol, (eq.dayStartSol * r.dailyLossLimitPctOfEquity) / 100);
+    }
+    return r.dailyLossLimitSol;
+  }
+
+  /**
+   * Atualiza o patrimônio (saldo + posições a preço de mercado) e verifica meta e piso.
+   * Retorna o evento ocorrido, se houver, para o motor notificar.
+   */
+  updateEquity(equitySol: number, solUsd: number, now: number): "goal" | "floor" | null {
+    const eq = this.store.state.equity;
+    const g = this.cfg.risk.goal;
+    const today = localDate(new Date(now));
+    eq.lastSol = equitySol;
+    eq.lastUsd = equitySol * solUsd;
+    eq.updatedAt = now;
+    eq.peakSol = Math.max(eq.peakSol, equitySol);
+    if (eq.dayDate !== today) {
+      eq.dayDate = today;
+      eq.dayStartSol = equitySol;
+    }
+    this.store.markDirty();
+    // Meta ou piso alterados no config depois de atingidos: libera de novo.
+    if (eq.goalReachedAt !== undefined && eq.goalTargetUsd !== g.targetUsd) eq.goalReachedAt = undefined;
+    if (eq.floorHitAt !== undefined && eq.floorUsd !== g.floorUsd) eq.floorHitAt = undefined;
+    if (g.targetUsd > 0 && eq.goalReachedAt === undefined && eq.lastUsd >= g.targetUsd) {
+      eq.goalReachedAt = now;
+      eq.goalTargetUsd = g.targetUsd;
+      return "goal";
+    }
+    if (g.floorUsd > 0 && eq.floorHitAt === undefined && eq.lastUsd > 0 && eq.lastUsd < g.floorUsd) {
+      eq.floorHitAt = now;
+      eq.floorUsd = g.floorUsd;
+      return "floor";
+    }
+    return null;
+  }
+
+  /** Capital ainda em risco numa posição: o que entrou menos o que já voltou. */
+  static atRisk(p: Position): number {
+    return Math.max(0, p.entrySol - p.realizedSol);
   }
 
   canOpen(sig: Signal, now: number, balanceSol: number | undefined): RiskDecision {
@@ -60,20 +112,48 @@ export class RiskManager {
     const recent = st.recentBuys.filter((t) => now - t < 3_600_000).length;
     if (recent >= r.maxBuysPerHour) return no(`máximo de ${r.maxBuysPerHour} compras/hora`);
 
-    let size = scfg.buySol;
-    const exposure = open.reduce((acc, p) => acc + p.entrySol, 0);
-    const room = r.maxTotalExposureSol - exposure;
-    if (room <= 0) return no(`exposição máxima ${r.maxTotalExposureSol} SOL atingida`);
+    // ---- tamanho
+    const equity = st.equity.lastSol > 0 ? st.equity.lastSol : balanceSol;
+    let size: number;
+    let base: number;
+    if (r.sizing.mode === "equityPct" && equity) {
+      base = ((equity * r.sizing.equityPct) / 100) * scfg.sizeMultiplier;
+      // Freio de drawdown: longe do pico, aposta menor (preserva a banca para a recuperação).
+      const peak = st.equity.peakSol;
+      if (r.sizing.throttleDrawdownPct > 0 && peak > 0 && equity < peak * (1 - r.sizing.throttleDrawdownPct / 100)) {
+        base *= r.sizing.throttleFactor;
+      }
+      base = Math.min(r.sizing.maxSol, base);
+      size = base;
+    } else {
+      base = scfg.buySol;
+      size = base;
+    }
+
+    // ---- exposição
+    const exposure = open.reduce((acc, p) => acc + RiskManager.atRisk(p), 0);
+    let maxExposure = r.maxTotalExposureSol;
+    if (r.maxTotalExposurePctOfEquity > 0 && equity) maxExposure = Math.min(maxExposure, (equity * r.maxTotalExposurePctOfEquity) / 100);
+    const room = maxExposure - exposure;
+    if (room <= 0) return no(`exposição máxima ${maxExposure.toFixed(4)} SOL atingida`);
     size = Math.min(size, room);
 
+    const fees = scfg.priorityFeeSol + scfg.tipFeeSol;
     if (balanceSol !== undefined) {
-      const fees = scfg.priorityFeeSol + scfg.tipFeeSol;
       const usable = balanceSol - r.minSolReserve - fees;
       size = Math.min(size, (balanceSol * r.maxPositionPctOfBalance) / 100, usable);
     }
-    // Abaixo de 20% do tamanho configurado não vale a pena (taxas comem o resultado).
-    if (size < scfg.buySol * 0.2 || size <= 0) return no(`saldo/espaço insuficiente (${size.toFixed(4)} SOL)`);
 
+    const minSize = r.sizing.mode === "equityPct" ? r.sizing.minSol : base * 0.2;
+    if (size <= 0 || size < minSize) return no(`saldo/espaço insuficiente (${Math.max(0, size).toFixed(4)} SOL)`);
+
+    // ---- taxas: ida + volta não podem comer o trade
+    if (r.maxFeePctOfTrade > 0) {
+      const feePct = ((2 * fees) / size) * 100;
+      if (feePct > r.maxFeePctOfTrade) {
+        return no(`taxas fixas ${feePct.toFixed(1)}% do trade > ${r.maxFeePctOfTrade}% (reduza priority/tip ou aumente o tamanho)`);
+      }
+    }
     return { ok: true, sizeSol: Number(size.toFixed(6)) };
   }
 

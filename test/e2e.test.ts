@@ -8,7 +8,7 @@ import { nullLogger } from "../src/core/logger.js";
 import { Engine } from "../src/engine.js";
 import { LiveExecutor } from "../src/execution/liveExecutor.js";
 import { buildRuntime } from "../src/runtime.js";
-import { fakeGmgn, listen, TOKEN } from "./fakeGmgn.js";
+import { fakeGmgn, listen, SIG_TOKEN, TOKEN } from "./fakeGmgn.js";
 import { cfg } from "./helpers.js";
 
 test("paper: scanner → sinal → compra → alta → take profit + trailing", async () => {
@@ -100,4 +100,51 @@ test("live sem confirmação de risco é bloqueado", () => {
     () => buildRuntime(cfg({ mode: "live" }), { apiKey: "k", privateKeyPem: "x", walletAddress: "w" }, nullLogger),
     /acknowledgeRisk/,
   );
+});
+
+test("sinal smart money → enriquecimento → dev + gráfico → compra; dev fábrica é barrado", async () => {
+  for (const [devLaunches, shouldBuy] of [
+    [3, true],
+    [500, false],
+  ] as const) {
+    const state = { price: 0.000012, devLaunches };
+    const { server } = fakeGmgn(state);
+    const host = await listen(server);
+    try {
+      const c = cfg({
+        mode: "paper",
+        gmgn: { host, plan: "pro", rateSafetyFactor: 1 },
+        storage: { dir: mkdtempSync(join(tmpdir(), "e2e-sig-")) },
+        paper: { failureRate: 0, startingBalanceSol: 1 },
+        scanner: { trenches: { enabled: false }, trending: { enabled: false } },
+        recorder: { enabled: false },
+        verifyDevBeforeBuy: true,
+        risk: { sizing: { mode: "equityPct", equityPct: 8 }, maxTotalExposureSol: 10 },
+        strategies: {
+          sniper: { enabled: false },
+          graduation: { enabled: false },
+          migration: { enabled: false },
+          momentum: { enabled: false },
+          smartMoney: { enabled: false },
+          survivor: { enabled: false },
+          smartSignal: { enabled: true, minSignalCount: 3, minScore: 40, klineMinScore: 50, priorityFeeSol: 0.0002, tipFeeSol: 0.0002 },
+        },
+      });
+      const rt = buildRuntime(c, { apiKey: "test-key" }, nullLogger);
+      const engine = new Engine({ ...rt });
+      await engine.step(Date.now());
+      const pos = rt.store.openPositions.find((p) => p.tokenAddress === SIG_TOKEN);
+      if (shouldBuy) {
+        assert.ok(pos, "deveria ter comprado pelo sinal");
+        assert.equal(pos.strategyId, "smartSignal");
+        // 8% do patrimônio (1 SOL) = 0.08 SOL + taxas
+        assert.ok(Math.abs(pos.entrySol - 0.0804) < 1e-6, String(pos.entrySol));
+        assert.ok(rt.store.state.equity.lastUsd > 0);
+      } else {
+        assert.equal(pos, undefined, "dev fábrica deveria ser barrado");
+      }
+    } finally {
+      server.close();
+    }
+  }
 });

@@ -1,7 +1,7 @@
 # GMGN Hot Bot 🤖
 
 Robô de compra e venda automatizada para **memecoins recém-lançadas ("hot") na Solana**, usando a
-**OpenAPI oficial da GMGN** (`openapi.gmgn.ai`). Ele tem 6 estratégias, filtros anti-rug, gestão de risco,
+**OpenAPI oficial da GMGN** (`openapi.gmgn.ai`). Ele tem 8 estratégias, filtros anti-rug, gestão de risco,
 modo **paper trading** (simulação com preços reais), painel web, alertas no Telegram e replay (backtest)
 sobre dados gravados.
 
@@ -45,6 +45,8 @@ e vende se o token piorar, por exemplo quando o `rug_ratio` dispara.
 | `momentum` | Momentum hot | No ranking 1m com alta forte e pressão compradora, sem entrar em vela já esticada | Ranking `1m`/`5m` |
 | `smartMoney` | Seguir smart money | O número de carteiras smart degen/KOL **aumentou** na janela | Qualquer |
 | `dipBuy` | Compra no recuo | Subiu forte em 1h, corrigiu em 5m e repica em 1m. *Desligada por padrão* | Ranking `1h` |
+| `smartSignal` | Confluência smart money/KOL | Vários sinais de smart money e KOL, sem perseguir o preço (recusa se o market cap já andou mais de 1,5x desde o 1º sinal) | Feed de sinais da GMGN |
+| `survivor` | Sobrevivente pós-migração | Graduou há 30 min–6 h, recuou do topo, holders e liquidez reais, repique começando ("2ª perna") | Ranking `1h` + trenches |
 
 Cada estratégia tem **tamanho de compra, slippage, taxas, pontuação mínima, filtros e regras de saída
 próprios**. Quando duas estratégias apontam o mesmo token, vale a de maior pontuação.
@@ -52,12 +54,20 @@ próprios**. Quando duas estratégias apontam o mesmo token, vale a de maior pon
 ### Filtros de segurança (antes de qualquer compra)
 
 mint/freeze authority renunciadas · honeypot · wash trading · `rug_ratio` · concentração top 10 · bundlers ·
-insiders · % do dev · snipers · impostos de compra/venda · liquidez e holders mínimos · blacklist de tokens e
-de devs. Logo antes de comprar, o robô busca `/v1/token/security` de novo, com dados frescos.
+insiders · % do dev · snipers · impostos de compra/venda · liquidez e holders mínimos · carteiras novas ·
+robôs · **faca caindo** (queda ≥ 10% em 5 min) · **bundlers vendendo** · **dev fábrica** (muitos lançamentos
+sem graduar) · blacklist de tokens e de devs.
+
+Logo antes de cada compra, o robô ainda busca o preço atual, reconsulta a segurança (`/v1/token/security`)
+e, quando configurado, o histórico do dev (`/v1/user/created_tokens`) e o padrão do gráfico de 1m. O
+slippage é calculado pela fórmula da GMGN, não fixo.
 
 ### Gestão de risco
 
-- máximo de posições (global e por estratégia) e exposição total em SOL
+- tamanho **fixo** ou **% do patrimônio** (juros compostos), com freio automático em drawdown
+- **meta** e **piso** de patrimônio em USD (para sozinho ao atingir)
+- filtro de **taxas**: recusa trades em que priority + tip passariam de X% do valor
+- máximo de posições (global e por estratégia) e exposição total (em SOL ou % do patrimônio)
 - tamanho limitado a % do saldo, com reserva de SOL para taxas
 - **limite de perda diária**, com meta de lucro diária opcional
 - pausa automática após N perdas seguidas
@@ -65,6 +75,19 @@ de devs. Logo antes de comprar, o robô busca `/v1/token/security` de novo, com 
 - **blacklist automática do dev** quando um token dele dá perda grande
 - **kill switch**: crie um arquivo chamado `STOP` na pasta do robô para bloquear novas compras na hora
 - trava (`bot.lock`) que impede duas instâncias de operarem o mesmo estado
+
+## 🎯 Plano "$100 → $1000"
+
+Para quem quer crescer uma banca pequena, há um preset feito a partir de pesquisa sobre o mercado de
+memecoins: [`config/preset-100-a-1000.yaml`](config/preset-100-a-1000.yaml). Ele traz juros compostos
+(8% do patrimônio por trade), saídas *moonbag*, taxas mínimas, meta de $1000 e piso de $40. A explicação
+completa, com os dados, a matemática (Monte Carlo) e o **plano em fases**, está em
+**[docs/ESTRATEGIA-100-PARA-1000.md](docs/ESTRATEGIA-100-PARA-1000.md)**.
+
+```bash
+npm run dev -- run --config config/preset-100-a-1000.yaml          # 1. valida em paper (100+ trades)
+npm run dev -- simulate --trades data/paper/trades.jsonl --bet 8   # 2. mede a chance real de 10x
+```
 
 ---
 
@@ -119,6 +142,8 @@ npm run scan -- --verbose       # inclui os motivos de reprovação
 npm run paper                   # roda em simulação (preços reais, dinheiro fictício)
 npm run status                  # posições abertas, PnL do dia/total e por estratégia
 npm run replay                  # backtest sobre data/recordings
+npm run dev -- simulate --trades data/paper/trades.jsonl   # Monte Carlo com seus trades
+npm run dev -- simulate --scenario equilibrado              # cenários hipotéticos
 npm run dev -- sell-all         # vende tudo (com o robô parado)
 ```
 
@@ -184,9 +209,9 @@ Regras de saída por estratégia (`strategies.<id>.exit`):
 |---|---|
 | `stopLossPct` | vende tudo se cair X% abaixo da entrada |
 | `takeProfits` | escada de vendas parciais: `atPct` = ganho, `sellPct` = % da posição **original** |
-| `trailing` | depois de `activateAtPct` de lucro, vende tudo se recuar `drawdownPct` da máxima |
+| `trailing` | depois de `activateAtPct` de lucro, vende tudo se recuar `drawdownPct` da máxima; `tiers` alarga a folga conforme o lucro (moonbag) |
 | `breakEvenAtPct` | depois de X% de lucro, o stop sobe para a entrada + `breakEvenBufferPct` |
-| `maxHoldMin` | tempo máximo na posição |
+| `maxHoldMin` / `maxHoldAfterTpMin` | tempo máximo na posição, antes e depois do 1º take profit |
 | `staleAfterMin` / `staleMinGainPct` | sai se, após X min, o pico não passou de Y% |
 | `exitOnSafetyFail` | vende se a segurança do token piorar durante a posição |
 
@@ -204,7 +229,8 @@ Regras de saída por estratégia (`strategies.<id>.exit`):
 
 ```
 src/
-  index.ts              CLI (init, keygen, check, scan, run, status, sell-all, replay)
+  index.ts              CLI (init, keygen, check, scan, run, status, sell-all, replay, simulate)
+  simulate.ts           Monte Carlo de banca
   runtime.ts            monta as dependências (cliente, executor, notificador...)
   engine.ts             motor: ciclos de scan, posições e manutenção
   replay.ts             backtest sobre gravações
@@ -212,7 +238,8 @@ src/
   gmgn/                 cliente OpenAPI GMGN (assinatura Ed25519/RSA, retries, rate-limit)
   scanner/              scanner, normalização dos dados, memória de tokens
   filters/safety.ts     filtros anti-rug
-  strategies/           as 6 estratégias
+  filters/kline.ts      leitura de padrão gráfico (método da GMGN)
+  strategies/           as 8 estratégias
   risk/riskManager.ts   gestão de risco
   positions/exitRules.ts regras de saída (funções puras)
   execution/            executor paper, executor live, dados de mercado

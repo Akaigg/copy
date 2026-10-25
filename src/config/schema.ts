@@ -30,6 +30,12 @@ export const ExitSchema = z.object({
       activateAtPct: z.number().nonnegative().default(40),
       /** Vende tudo se o preço recuar X% a partir da máxima. */
       drawdownPct: z.number().positive().max(100).default(20),
+      /**
+       * Trailing escalonado: quanto maior o lucro, mais folga. Retornos de memecoin seguem
+       * lei de potência — dar espaço aos raros 10x+ é o que paga as várias perdas pequenas.
+       * Ex.: [{atPct: 150, drawdownPct: 30}, {atPct: 400, drawdownPct: 40}]
+       */
+      tiers: z.array(z.object({ atPct: z.number().nonnegative(), drawdownPct: z.number().positive().max(100) })).default([]),
     })
     .default({}),
   /** Ao atingir X% de lucro, o stop sobe para a entrada + `breakEvenBufferPct`. null = desativado. */
@@ -37,6 +43,8 @@ export const ExitSchema = z.object({
   breakEvenBufferPct: z.number().default(2),
   /** Tempo máximo de permanência na posição (minutos). 0 = sem limite. */
   maxHoldMin: z.number().nonnegative().default(60),
+  /** Tempo máximo depois que algum take profit já foi executado (moonbag). 0 = usa maxHoldMin. */
+  maxHoldAfterTpMin: z.number().nonnegative().default(0),
   /** Se após X minutos o lucro for menor que `staleMinGainPct`, sai (posição "morta"). 0 = desativado. */
   staleAfterMin: z.number().nonnegative().default(10),
   staleMinGainPct: z.number().default(5),
@@ -67,6 +75,21 @@ export const SafetySchema = z.object({
   minLiquidityUsd: z.number().nonnegative().default(5000),
   minHolders: z.number().nonnegative().default(10),
   requireSocial: z.boolean().default(false),
+  /** Carteiras novas (fresh wallets) entre holders — farm de carteiras. Limite da GMGN: 30%. */
+  maxFreshWalletRate: z.number().min(0).max(1).default(0.3),
+  /** Fração de carteiras-robô. Limite da GMGN: 60%. */
+  maxBotDegenRate: z.number().min(0).max(1).default(0.6),
+  /**
+   * "Faca caindo": não compra se o preço caiu X% ou mais nos últimos 5 min
+   * (regra de execução da própria GMGN). 0 = desliga.
+   */
+  maxDrop5mPct: z.number().nonnegative().default(10),
+  /** Dev "fábrica": rejeita criador com mais de N lançamentos que nunca graduaram. 0 = desliga. */
+  maxDevFailedLaunches: z.number().nonnegative().default(50),
+  /** Taxa mínima de graduação do dev (0–1), aplicada só se ele tiver 5+ lançamentos. 0 = desliga. */
+  minDevGraduationRatio: z.number().min(0).max(1).default(0),
+  /** Rejeita (e sai de) tokens com sinal de bundlers vendendo (GMGN signal 10). */
+  rejectBundlerSelling: z.boolean().default(true),
   /** Só compra se o dev já tiver saído (creator_close). Muito restritivo para tokens recém-criados. */
   requireCreatorClosed: z.boolean().default(false),
   /**
@@ -93,6 +116,22 @@ const BaseStrategy = z.object({
   antiMev: z.boolean().default(true),
   /** Pontuação mínima (0–100) para comprar. */
   minScore: z.number().min(0).max(100).default(50),
+  /** Multiplicador do tamanho no modo de banca percentual (risk.sizing.mode = equityPct). */
+  sizeMultiplier: z.number().positive().default(1),
+  /**
+   * Slippage dinâmico (fórmula da GMGN): 2% + impostos + impacto×1,5 + |Δ5m|×0,5 (+3% se < 1h),
+   * limitado entre `minSlippagePct` e `slippagePct`.
+   */
+  dynamicSlippage: z.boolean().default(true),
+  minSlippagePct: z.number().positive().default(5),
+  /**
+   * Confirmação pelo gráfico de 1m (padrões da GMGN): score mínimo 0–100. 0 = desligado.
+   * Custa 1 requisição extra por candidato aprovado.
+   */
+  klineMinScore: z.number().min(0).max(100).default(0),
+  klineRejectPatterns: z
+    .array(z.enum(["breakdown", "slowBleed", "distribution", "wideChop", "bearishConsolidation", "verticalRunUp"]))
+    .default(["breakdown", "slowBleed", "distribution"]),
   exit: ExitSchema.default({}),
   /** Sobrescreve filtros de segurança globais só para esta estratégia. */
   safety: SafetySchema.partial().default({}),
@@ -162,6 +201,8 @@ export const SmartMoneySchema = BaseStrategy.extend({
 export const DipBuySchema = BaseStrategy.extend({
   /** Desligada por padrão: pegar "faca caindo" é a mais arriscada das estratégias. */
   enabled: z.boolean().default(false),
+  /** Esta estratégia compra justamente o recuo de 5 min: a regra global da "faca caindo" é afrouxada. */
+  safety: SafetySchema.partial().default({ maxDrop5mPct: 40 }),
   minPriceChange1hPct: z.number().default(80),
   minPriceChange5mPct: z.number().default(-35),
   maxPriceChange5mPct: z.number().default(-12),
@@ -171,6 +212,46 @@ export const DipBuySchema = BaseStrategy.extend({
   minBuySellRatio: z.number().nonnegative().default(1.0),
   maxAgeHours: z.number().positive().default(24),
   minHolders: z.number().nonnegative().default(200),
+});
+
+export const SmartSignalSchema = BaseStrategy.extend({
+  /** Tipos de sinal da GMGN: 12 = smart money comprou, 20 = KOL comprou. */
+  signalTypes: z.array(z.number().int()).default([12, 20]),
+  /** Total mínimo de disparos desses tipos para o token. */
+  minSignalCount: z.number().int().positive().default(2),
+  /** O último sinal precisa ser recente. */
+  maxSignalAgeSec: z.number().positive().default(300),
+  /**
+   * Penalidade de imitação: não compra se o market cap já subiu mais que X vezes desde o
+   * primeiro sinal (quem copia atrasado paga o topo para o líder).
+   */
+  maxChaseMultiple: z.number().positive().default(1.6),
+  minMarketCapUsd: z.number().nonnegative().default(15000),
+  maxMarketCapUsd: z.number().positive().default(3_000_000),
+  minLiquidityUsd: z.number().nonnegative().default(15000),
+  minHolders: z.number().nonnegative().default(150),
+  minBuySellRatio: z.number().nonnegative().default(1.0),
+});
+
+export const SurvivorSchema = BaseStrategy.extend({
+  /** A maioria dos tokens graduados desaba logo após migrar: só olha quem sobreviveu a isso. */
+  minMinutesSinceOpen: z.number().nonnegative().default(30),
+  maxMinutesSinceOpen: z.number().positive().default(360),
+  /** Precisa ter recuado do topo (não compra no pico)... */
+  minAthRetracePct: z.number().nonnegative().default(15),
+  /** ...mas não pode estar morto. */
+  maxAthRetracePct: z.number().positive().max(100).default(60),
+  minHolders: z.number().nonnegative().default(400),
+  /** Crescimento de holders na janela de 10 min (exige histórico). 0 = ignora. */
+  minHolderGrowthPct: z.number().nonnegative().default(0),
+  minLiquidityUsd: z.number().nonnegative().default(30000),
+  minVolume1hUsd: z.number().nonnegative().default(30000),
+  minMarketCapUsd: z.number().nonnegative().default(80000),
+  maxMarketCapUsd: z.number().positive().default(5_000_000),
+  minBuySellRatio: z.number().nonnegative().default(1.05),
+  /** Repique começando no último minuto. */
+  minPriceChange1mPct: z.number().default(0),
+  minSmartDegenCount: z.number().nonnegative().default(2),
 });
 
 export const ConfigSchema = z.object({
@@ -230,6 +311,17 @@ export const ConfigSchema = z.object({
           everyNTicks: z.record(z.number().int().positive()).default({ "1m": 1, "5m": 2, "1h": 4, "6h": 8, "24h": 8 }),
         })
         .default({}),
+      signals: z
+        .object({
+          /** Feed de sinais da GMGN (smart money / KOL / bundlers vendendo). */
+          enabled: z.boolean().default(true),
+          /** Tipos consultados. 10 (bundler vendendo) é usado como sinal NEGATIVO. */
+          types: z.array(z.number().int()).default([12, 20, 10]),
+          everyNTicks: z.number().int().positive().default(2),
+          /** Busca preço/liquidez (token/info) para no máximo N tokens só-sinal por ciclo. */
+          enrichPerTick: z.number().int().nonnegative().default(4),
+        })
+        .default({}),
       /** Quantos snapshots por token manter em memória para análise de tendência. */
       historySize: z.number().int().positive().default(60),
       /** Esquece tokens não vistos há X minutos. */
@@ -240,17 +332,26 @@ export const ConfigSchema = z.object({
   safety: SafetySchema.default({}),
   /** Revalida a segurança do token (endpoint /token/security) imediatamente antes de comprar. */
   verifySecurityBeforeBuy: z.boolean().default(true),
+  /**
+   * Consulta o histórico do dev (/user/created_tokens) antes de comprar: barra devs
+   * "fábrica" (top 1% dos criadores lança ~58% das moedas do pump.fun). 1 requisição por compra.
+   */
+  verifyDevBeforeBuy: z.boolean().default(false),
 
   risk: z
     .object({
       maxOpenPositions: z.number().int().positive().default(6),
       maxTotalExposureSol: z.number().positive().default(0.5),
+      /** Exposição máxima como % do patrimônio (0 = só o limite em SOL). */
+      maxTotalExposurePctOfEquity: z.number().nonnegative().max(100).default(0),
       /** Nunca usar mais que X% do saldo numa única compra. */
       maxPositionPctOfBalance: z.number().positive().max(100).default(10),
       /** Reserva de SOL para taxas que nunca é usada para comprar. */
       minSolReserve: z.number().nonnegative().default(0.05),
       /** Para de comprar no dia se a perda realizada atingir X SOL. */
       dailyLossLimitSol: z.number().positive().default(0.3),
+      /** Limite de perda diária como % do patrimônio no início do dia (0 = só o limite em SOL). */
+      dailyLossLimitPctOfEquity: z.number().nonnegative().max(100).default(0),
       /** Para de comprar no dia se atingir esse lucro (0 = sem meta). */
       dailyProfitTargetSol: z.number().nonnegative().default(0),
       maxConsecutiveLosses: z.number().int().positive().default(4),
@@ -260,6 +361,34 @@ export const ConfigSchema = z.object({
       maxBuysPerHour: z.number().int().positive().default(12),
       /** Bloqueia o criador (dev) se o token dele der perda maior que X%. 0 = desativado. */
       blacklistCreatorOnLossPct: z.number().nonnegative().default(50),
+      /**
+       * Taxas fixas de ida e volta (priority + tip) não podem passar de X% do valor da compra.
+       * Em contas pequenas as taxas são o maior inimigo. 0 = desliga.
+       */
+      maxFeePctOfTrade: z.number().nonnegative().default(4),
+      sizing: z
+        .object({
+          /**
+           * fixed     = usa `buySol` de cada estratégia
+           * equityPct = % do patrimônio atual × `sizeMultiplier` da estratégia (juros compostos)
+           */
+          mode: z.enum(["fixed", "equityPct"]).default("fixed"),
+          equityPct: z.number().positive().max(100).default(6),
+          minSol: z.number().nonnegative().default(0.02),
+          maxSol: z.number().positive().default(2),
+          /** Se o patrimônio cair X% do pico, multiplica o tamanho por `throttleFactor`. 0 = desliga. */
+          throttleDrawdownPct: z.number().nonnegative().max(100).default(25),
+          throttleFactor: z.number().positive().max(1).default(0.5),
+        })
+        .default({}),
+      goal: z
+        .object({
+          /** Meta de patrimônio em USD (0 = sem meta). Ao atingir, para de comprar e avisa. */
+          targetUsd: z.number().nonnegative().default(0),
+          /** Piso: se o patrimônio cair abaixo disso (USD), para de comprar. 0 = desliga. */
+          floorUsd: z.number().nonnegative().default(0),
+        })
+        .default({}),
     })
     .default({}),
 
@@ -352,6 +481,8 @@ export const ConfigSchema = z.object({
       momentum: MomentumSchema.default({}),
       smartMoney: SmartMoneySchema.default({}),
       dipBuy: DipBuySchema.default({}),
+      smartSignal: SmartSignalSchema.default({}),
+      survivor: SurvivorSchema.default({}),
     })
     .default({}),
 });
@@ -365,5 +496,16 @@ export type MigrationConfig = z.infer<typeof MigrationSchema>;
 export type MomentumConfig = z.infer<typeof MomentumSchema>;
 export type SmartMoneyConfig = z.infer<typeof SmartMoneySchema>;
 export type DipBuyConfig = z.infer<typeof DipBuySchema>;
+export type SmartSignalConfig = z.infer<typeof SmartSignalSchema>;
+export type SurvivorConfig = z.infer<typeof SurvivorSchema>;
 
-export const STRATEGY_IDS: StrategyId[] = ["sniper", "graduation", "migration", "momentum", "smartMoney", "dipBuy"];
+export const STRATEGY_IDS: StrategyId[] = [
+  "sniper",
+  "graduation",
+  "migration",
+  "momentum",
+  "smartMoney",
+  "dipBuy",
+  "smartSignal",
+  "survivor",
+];

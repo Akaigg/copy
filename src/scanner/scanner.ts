@@ -2,8 +2,9 @@ import type { Config } from "../config/schema.js";
 import type { Logger } from "../core/logger.js";
 import type { TokenSnapshot } from "../core/types.js";
 import { errMsg } from "../core/utils.js";
+import { Priority } from "../core/rateLimiter.js";
 import type { GmgnClient } from "../gmgn/client.js";
-import { fromRank, fromTrenches, mergeSnapshots } from "./normalize.js";
+import { fromRank, fromSignals, fromTokenInfo, fromTrenches, mergeSnapshots, signalCount } from "./normalize.js";
 
 type RankInterval = "1m" | "5m" | "1h" | "6h" | "24h";
 
@@ -16,11 +17,13 @@ export interface Scanner {
  * Busca tokens na GMGN a cada ciclo:
  *  - Trenches: recém-criados (bonding curve), quase graduando e recém-graduados
  *  - Ranking "hot" por intervalo (1m/5m/1h...), restrito a tokens jovens
+ *  - Feed de sinais (smart money / KOL comprando, bundlers vendendo)
  * Cada fonte falha de forma independente — uma rota fora do ar não para o robô.
  */
 export class GmgnScanner implements Scanner {
   private tick = 0;
   private failures = new Map<string, number>();
+  private lastEnriched = new Map<string, number>();
 
   constructor(
     private readonly client: GmgnClient,
@@ -43,6 +46,11 @@ export class GmgnScanner implements Scanner {
       }
     }
 
+    const sig = sc.signals;
+    if (sig.enabled && sig.types.length && (this.tick - 1) % sig.everyNTicks === 0) {
+      jobs.push(this.guard("signals", () => this.signals(now)));
+    }
+
     const results = await Promise.all(jobs);
     const byAddr = new Map<string, TokenSnapshot>();
     for (const list of results) {
@@ -51,7 +59,44 @@ export class GmgnScanner implements Scanner {
         byAddr.set(s.address, prev ? mergeSnapshots(prev, s) : s);
       }
     }
+    await this.enrich([...byAddr.values()], byAddr, now);
     return [...byAddr.values()];
+  }
+
+  /**
+   * Tokens que só vieram do feed de sinais não têm preço/liquidez: busca token/info
+   * para os mais sinalizados (limitado por ciclo para poupar rate-limit).
+   */
+  private async enrich(list: TokenSnapshot[], byAddr: Map<string, TokenSnapshot>, now: number) {
+    const max = this.cfg.scanner.signals.enrichPerTick;
+    if (!max) return;
+    const types = this.cfg.scanner.signals.types.filter((t) => t !== 10);
+    const need = list
+      .filter((s) => s.sources.length === 1 && s.sources[0] === "signal")
+      .filter((s) => now - (this.lastEnriched.get(s.address) ?? 0) > 20_000)
+      .sort((a, b) => signalCount(b, types) - signalCount(a, types))
+      .slice(0, max);
+    await Promise.all(
+      need.map(async (s) => {
+        this.lastEnriched.set(s.address, now);
+        try {
+          const info = await this.client.getTokenInfo(this.cfg.chain, s.address, Priority.Scan);
+          const snap = fromTokenInfo({ address: s.address, ...info }, now);
+          if (snap) byAddr.set(s.address, mergeSnapshots(s, { ...snap, sources: [] }));
+        } catch (e) {
+          this.log.debug(`enrich ${s.address}: ${errMsg(e)}`);
+        }
+      }),
+    );
+    if (this.lastEnriched.size > 5000) {
+      for (const [a, t] of this.lastEnriched) if (now - t > 600_000) this.lastEnriched.delete(a);
+    }
+  }
+
+  private async signals(now: number): Promise<TokenSnapshot[]> {
+    const groups = this.cfg.scanner.signals.types.map((t) => ({ signal_type: [t] }));
+    const data = await this.client.getSignals(this.cfg.chain, groups);
+    return fromSignals(flattenItems(data), now);
   }
 
   private async guard(name: string, fn: () => Promise<TokenSnapshot[]>): Promise<TokenSnapshot[]> {
@@ -110,4 +155,16 @@ export class GmgnScanner implements Scanner {
     }
     return out;
   }
+}
+
+/** O feed de sinais pode vir como array, array de arrays (um por grupo) ou objeto com listas. */
+export function flattenItems(data: unknown, depth = 0): Record<string, unknown>[] {
+  if (depth > 3 || data === null || data === undefined) return [];
+  if (Array.isArray(data)) return data.flatMap((d) => flattenItems(d, depth + 1));
+  if (typeof data === "object") {
+    const o = data as Record<string, unknown>;
+    if ("token_address" in o) return [o];
+    return Object.values(o).flatMap((v) => (Array.isArray(v) || (v && typeof v === "object") ? flattenItems(v, depth + 1) : []));
+  }
+  return [];
 }

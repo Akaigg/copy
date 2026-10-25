@@ -89,6 +89,7 @@ async function load(){
  document.getElementById('block').textContent=s.blockReason?'⛔ Compras bloqueadas: '+s.blockReason:'';
  const wr=s.totals.trades?Math.round(s.totals.wins/s.totals.trades*100):0;
  document.getElementById('cards').innerHTML=[
+  ['Patrimônio',s.equity&&s.equity.lastUsd?'$'+f(s.equity.lastUsd,2)+(s.goalUsd?' / $'+s.goalUsd+' ('+Math.min(100,Math.round(s.equity.lastUsd/s.goalUsd*100))+'%)':''):'-'],
   ['Saldo',f(s.balanceSol)+' SOL'],['PnL hoje','<span class="'+cls(s.daily.realizedPnlSol)+'">'+f(s.daily.realizedPnlSol)+' SOL</span>'],
   ['PnL total','<span class="'+cls(s.totals.realizedPnlSol)+'">'+f(s.totals.realizedPnlSol)+' SOL</span>'],
   ['Trades / acerto',s.totals.trades+' / '+wr+'%'],['Tokens monitorados',s.tokensTracked],['SOL',s.solPriceUsd?'$'+f(s.solPriceUsd,2):'-']

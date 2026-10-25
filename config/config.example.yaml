@@ -35,6 +35,9 @@ scanner:
     limit: 50
     filters: ["renounced", "frozen"]
     maxCreatedMin: 1440 # só tokens com até 24h de vida
+  signals: # feed de sinais da GMGN
+    enabled: true
+    types: [12, 20, 10] # 12 smart money, 20 KOL, 10 bundlers vendendo (negativo)
 
 # ---------------------------------------------------------------- segurança
 safety:
@@ -53,10 +56,16 @@ safety:
   minLiquidityUsd: 5000
   minHolders: 10
   requireSocial: false
+  maxFreshWalletRate: 0.3
+  maxBotDegenRate: 0.6
+  maxDrop5mPct: 10 # "faca caindo"
+  maxDevFailedLaunches: 50
+  rejectBundlerSelling: true
   strictMissing: false # true = rejeita quando a GMGN não informa o dado
   blacklistTokens: []
   blacklistCreators: []
 verifySecurityBeforeBuy: true # rechecagem /token/security antes de cada compra
+verifyDevBeforeBuy: false # histórico do dev antes de comprar (1 requisição)
 
 # ---------------------------------------------------------------- risco
 risk:
@@ -71,6 +80,13 @@ risk:
   tokenCooldownMin: 240
   maxBuysPerHour: 12
   blacklistCreatorOnLossPct: 50 # bloqueia o dev se o token dele der -50%
+  maxFeePctOfTrade: 4 # taxas fixas ida+volta ≤ 4% do trade
+  sizing:
+    mode: fixed # ou equityPct (juros compostos: % do patrimônio × sizeMultiplier)
+    equityPct: 6
+  goal:
+    targetUsd: 0 # ex.: 1000 → para de comprar ao atingir
+    floorUsd: 0
 
 positions:
   monitorIntervalMs: 2500
@@ -250,3 +266,24 @@ strategies:
         - { atPct: 60, sellPct: 30 }
       trailing: { enabled: true, activateAtPct: 20, drawdownPct: 12 }
       maxHoldMin: 40
+
+  # Confluência de sinais de smart money/KOL (feed da GMGN), sem perseguir o preço.
+  smartSignal:
+    enabled: true
+    buySol: 0.04
+    minScore: 50
+    signalTypes: [12, 20]
+    minSignalCount: 2
+    maxSignalAgeSec: 300
+    maxChaseMultiple: 1.6
+
+  # Sobrevivente pós-migração: graduou há 30 min–6 h e mostra força ("2ª perna").
+  survivor:
+    enabled: true
+    buySol: 0.05
+    minScore: 50
+    klineMinScore: 50 # confirma pelo gráfico de 1m
+    minMinutesSinceOpen: 30
+    maxMinutesSinceOpen: 360
+    minAthRetracePct: 15
+    maxAthRetracePct: 60

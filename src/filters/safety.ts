@@ -53,8 +53,34 @@ export function checkSafety(s: TokenSnapshot, cfg: SafetyConfig): SafetyResult {
   max(s.sellTax, cfg.maxSellTax, "sell_tax");
   min(s.liquidityUsd, cfg.minLiquidityUsd, "liquidez");
   min(s.holderCount, cfg.minHolders, "holders");
+  if (s.freshWalletRate !== undefined && s.freshWalletRate > cfg.maxFreshWalletRate) {
+    f.push(`carteiras novas ${fmt(s.freshWalletRate)} > ${fmt(cfg.maxFreshWalletRate)}`);
+  }
+  if (s.botDegenRate !== undefined && s.botDegenRate > cfg.maxBotDegenRate) {
+    f.push(`robôs ${fmt(s.botDegenRate)} > ${fmt(cfg.maxBotDegenRate)}`);
+  }
+  if (cfg.maxDrop5mPct > 0 && s.priceChange5mPct !== undefined && s.priceChange5mPct <= -cfg.maxDrop5mPct) {
+    f.push(`faca caindo: ${s.priceChange5mPct.toFixed(1)}% em 5m`);
+  }
+  if (cfg.rejectBundlerSelling && (s.signalCounts?.["10"] ?? 0) > 0) f.push("bundlers vendendo");
+  f.push(...devFailures(s.devCreatedCount, s.devGraduatedCount, cfg));
 
   return { ok: f.length === 0, failures: f };
+}
+
+/** Regras de histórico do dev (usadas com dados do trenches e de /user/created_tokens). */
+export function devFailures(created: number | undefined, graduated: number | undefined, cfg: SafetyConfig): string[] {
+  if (created === undefined) return [];
+  const out: string[] = [];
+  const grad = graduated ?? 0;
+  const failed = Math.max(0, created - grad);
+  if (cfg.maxDevFailedLaunches > 0 && failed > cfg.maxDevFailedLaunches) {
+    out.push(`dev fábrica: ${failed} lançamentos sem graduar`);
+  }
+  if (cfg.minDevGraduationRatio > 0 && created >= 5 && grad / created < cfg.minDevGraduationRatio) {
+    out.push(`dev gradua ${((grad / created) * 100).toFixed(1)}% < ${(cfg.minDevGraduationRatio * 100).toFixed(1)}%`);
+  }
+  return out;
 }
 
 function fmt(v: number): string {

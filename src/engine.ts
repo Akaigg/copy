@@ -6,7 +6,9 @@ import type { Position, Signal, TokenSnapshot, TradeRecord } from "./core/types.
 import { errMsg, fmtSol, fmtUsd, fromRaw, shortAddr, sleep } from "./core/utils.js";
 import type { MarketData } from "./execution/marketData.js";
 import type { Executor } from "./execution/types.js";
-import { checkSafety, mergeSafety } from "./filters/safety.js";
+import { readPattern } from "./filters/kline.js";
+import { checkSafety, devFailures, mergeSafety } from "./filters/safety.js";
+import { dynamicSlippage, klineVeto } from "./execution/preBuy.js";
 import type { Notifier } from "./notify/notifier.js";
 import { decideExit, trackPrice, type ExitDecision } from "./positions/exitRules.js";
 import { RiskManager } from "./risk/riskManager.js";
@@ -43,6 +45,8 @@ export interface EngineStatus {
   positions: Array<Position & { pnlPct: number; valueSol: number; unrealizedSol: number }>;
   daily: StateStore["state"]["daily"];
   totals: StateStore["state"]["totals"];
+  equity: StateStore["state"]["equity"];
+  goalUsd: number;
   recentTrades: TradeRecord[];
 }
 
@@ -200,6 +204,7 @@ export class Engine {
   async step(now: number) {
     this.isManual = true;
     this.store.rollDay();
+    await this.refreshEquity(now);
     await this.processScan(now);
     await this.processPositions(now);
   }
@@ -235,13 +240,57 @@ export class Engine {
         }
       }
 
+      // Preço velho = compra no escuro. Busca preço novo se o do scanner passou do prazo.
+      if (!token.priceAt || now - token.priceAt > this.cfg.positions.priceMaxAgeMs * 2) {
+        const fresh = (await this.market.refresh([t.address], now)).get(t.address);
+        if (!fresh?.priceUsd) {
+          this.skip(t.address, now, 60_000);
+          return false;
+        }
+        token = mergeSnapshots(token, { ...fresh, sources: [] });
+        this.tokens.patch(t.address, fresh);
+        const res = checkSafety(token, mergeSafety(this.globalSafety(), strat.safety));
+        if (!res.ok) {
+          this.log.info(`✋ ${t.symbol} reprovado com preço atualizado: ${res.failures.join("; ")}`);
+          this.skip(t.address, now, 10 * 60_000);
+          return false;
+        }
+      }
+
+      // Histórico do dev: barra "fábricas" de tokens.
+      if (this.cfg.verifyDevBeforeBuy && token.creator && this.market.devHistory) {
+        const dev = await this.market.devHistory(token.creator);
+        if (dev) {
+          const fails = devFailures(dev.created, dev.graduated, mergeSafety(this.globalSafety(), strat.safety));
+          if (fails.length) {
+            this.log.info(`✋ ${t.symbol}: ${fails.join("; ")}`);
+            this.skip(t.address, now, 6 * 3_600_000);
+            return false;
+          }
+        }
+      }
+
+      // Confirmação pelo gráfico de 1m (padrões da GMGN).
+      if (strat.klineMinScore > 0 && this.market.kline) {
+        const candles = await this.market.kline(t.address, now);
+        const veto = candles ? klineVeto(readPattern(candles), strat) : null;
+        if (veto) {
+          this.log.info(`✋ ${t.symbol}: ${veto}`);
+          this.skip(t.address, now, 5 * 60_000);
+          return false;
+        }
+      }
+
+      const solUsd = this.cachedSolPrice ?? (await this.market.solPriceUsd());
+      const slippagePct = dynamicSlippage(token, sizeSol * solUsd, strat, now);
+
       this.store.state.pendingBuys.push({ token: t.address, symbol: t.symbol, strategyId: sig.strategyId, startedAt: now });
       this.store.save(true);
 
       this.log.info(
-        `🟢 COMPRA ${t.symbol} (${shortAddr(t.address)}) via ${sig.strategyId} | score ${sig.score} | ${fmtSol(sizeSol)} | mcap ${fmtUsd(t.marketCapUsd)} | ${sig.reasons.slice(0, 6).join(", ")}`,
+        `🟢 COMPRA ${t.symbol} (${shortAddr(t.address)}) via ${sig.strategyId} | score ${sig.score} | ${fmtSol(sizeSol)} | slippage ${slippagePct}% | mcap ${fmtUsd(token.marketCapUsd)} | ${sig.reasons.slice(0, 6).join(", ")}`,
       );
-      const res = await this.executor.buy({ token, sizeSol, strategy: strat });
+      const res = await this.executor.buy({ token, sizeSol, strategy: { ...strat, slippagePct } });
       const pending = this.store.state.pendingBuys.find((p) => p.token === t.address);
 
       if (!res.ok) {
@@ -457,7 +506,32 @@ export class Engine {
 
   // ------------------------------------------------------------------ manutenção
 
+  /** Patrimônio = saldo + posições a preço de mercado. Alimenta juros compostos, meta e piso. */
+  async refreshEquity(now: number) {
+    // Com ordem em andamento o SOL já saiu e os tokens ainda não entraram: o patrimônio
+    // pareceria menor e poderia disparar o piso por engano.
+    if (this.inflight.size || this.store.state.pendingBuys.length) return;
+    const bal = await this.balance();
+    if (bal === undefined) return;
+    const sol = await this.market.solPriceUsd();
+    this.cachedSolPrice = sol;
+    const positions = this.store.openPositions.reduce(
+      (acc, p) => acc + (fromRaw(p.tokensRemainingRaw, p.tokenDecimals) * p.lastPriceUsd) / sol,
+      0,
+    );
+    const ev = this.risk.updateEquity(bal + positions, sol, now);
+    const eq = this.store.state.equity;
+    if (ev === "goal") {
+      this.log.warn(`🏁 META ATINGIDA: patrimônio $${eq.lastUsd.toFixed(2)} — novas compras encerradas`);
+      this.notifier.send("risk", `🏁 <b>META ATINGIDA</b>: $${eq.lastUsd.toFixed(2)}. Novas compras encerradas; posições abertas seguem gerenciadas.`);
+    } else if (ev === "floor") {
+      this.log.warn(`🧱 Patrimônio abaixo do piso: $${eq.lastUsd.toFixed(2)} — novas compras encerradas`);
+      this.notifier.send("risk", `🧱 Patrimônio abaixo do piso ($${eq.lastUsd.toFixed(2)}). Novas compras encerradas.`);
+    }
+  }
+
   private async maintenance(now: number) {
+    await this.refreshEquity(now);
     const prev = { ...this.store.state.daily };
     if (this.store.rollDay()) {
       this.notifier.send(
@@ -557,7 +631,15 @@ export class Engine {
       const merged = snap ? mergeSnapshots(snap, sec) : undefined;
       if (!merged) continue;
       // Só critérios de "rug" — liquidez/holders oscilam naturalmente.
-      const strict = { ...mergeSafety(this.globalSafety(), this.cfg.strategies[p.strategyId].safety), minLiquidityUsd: 0, minHolders: 0, strictMissing: false };
+      const strict = {
+        ...mergeSafety(this.globalSafety(), this.cfg.strategies[p.strategyId].safety),
+        minLiquidityUsd: 0,
+        minHolders: 0,
+        strictMissing: false,
+        maxDrop5mPct: 0, // queda de preço é assunto do stop, não de segurança
+        maxDevFailedLaunches: 0,
+        minDevGraduationRatio: 0,
+      };
       const res = checkSafety(merged, strict);
       if (!res.ok) {
         this.log.warn(`⚠️ ${p.symbol}: segurança piorou (${res.failures.join("; ")}) — saindo`);
@@ -620,6 +702,8 @@ export class Engine {
       positions,
       daily: this.store.state.daily,
       totals: this.store.state.totals,
+      equity: this.store.state.equity,
+      goalUsd: this.cfg.risk.goal.targetUsd,
       recentTrades: this.recentTrades.slice().reverse(),
     };
   }

@@ -1,0 +1,262 @@
+# ============================================================================
+#  PRESET "$100 → $1000" — leia docs/ESTRATEGIA-100-PARA-1000.md antes de usar.
+#
+#  Uso:  npm run dev -- run --config config/preset-100-a-1000.yaml
+#
+#  Princípios (todos vindos da pesquisa e da simulação Monte Carlo):
+#   1. Banca pequena = taxas são o inimigo nº 1 → priority/tip mínimos e filtro de taxa.
+#   2. Não disputar os primeiros segundos com bots (sniper desligado): latência e taxa
+#      alta são exatamente onde uma conta de $100 perde.
+#   3. Juros compostos: aposta = 8% do patrimônio (cresce quando ganha, encolhe quando perde).
+#   4. Saída assimétrica: recupera o capital em 2x e deixa um "moonbag" correr com trailing
+#      largo — os raros 10x+ pagam as muitas perdas pequenas.
+#   5. Meta e piso: para sozinho ao chegar em $1000 ou cair abaixo de $40.
+# ============================================================================
+
+mode: paper # mude para live SÓ depois da fase de validação (ver docs)
+
+gmgn:
+  plan: free # live exige plus/pro (swap pesa 10)
+
+live:
+  acknowledgeRisk: false
+
+scanner:
+  intervalMs: 4000
+  trenches:
+    enabled: true
+    types: [near_completion, completed] # sem new_creation: o sniper está desligado
+    limit: 50
+    serverFilters:
+      max_rug_ratio: 0.3
+      max_bundler_rate: 0.3
+      max_insider_ratio: 0.3
+  trending:
+    enabled: true
+    intervals: ["1m", "5m", "1h"]
+    limit: 60
+    maxCreatedMin: 1440
+  signals:
+    enabled: true
+    types: [12, 20, 10] # smart money, KOL, bundlers vendendo (negativo)
+    everyNTicks: 2
+    enrichPerTick: 4
+
+# ---------------------------------------------------------------- segurança (mais rígida)
+safety:
+  requireMintRenounced: true
+  requireFreezeRenounced: true
+  rejectHoneypot: true
+  rejectWashTrading: true
+  maxRugRatio: 0.25
+  maxTop10HolderRate: 0.3
+  maxBundlerRate: 0.2
+  maxInsiderRate: 0.15
+  maxDevHoldRate: 0.05 # limite de alerta da GMGN
+  maxTop70SniperHoldRate: 0.25
+  maxEntrapmentRatio: 0.3
+  maxFreshWalletRate: 0.3
+  maxBotDegenRate: 0.6
+  maxBuyTax: 0.03
+  maxSellTax: 0.03
+  minLiquidityUsd: 10000
+  minHolders: 100
+  maxDrop5mPct: 10 # regra da GMGN: não compra faca caindo
+  maxDevFailedLaunches: 30
+  minDevGraduationRatio: 0.02
+  rejectBundlerSelling: true
+verifySecurityBeforeBuy: true
+verifyDevBeforeBuy: true
+
+# ---------------------------------------------------------------- banca e risco
+risk:
+  maxOpenPositions: 4
+  maxTotalExposureSol: 1000 # na prática o limite é o % abaixo
+  maxTotalExposurePctOfEquity: 40 # no máximo 40% do patrimônio em risco ao mesmo tempo
+  maxPositionPctOfBalance: 15
+  minSolReserve: 0.02 # para taxas de saída
+  dailyLossLimitSol: 1000
+  dailyLossLimitPctOfEquity: 15 # perdeu 15% no dia → para até amanhã
+  maxConsecutiveLosses: 4
+  pauseAfterLossesMin: 60
+  tokenCooldownMin: 360
+  maxBuysPerHour: 8
+  blacklistCreatorOnLossPct: 40
+  maxFeePctOfTrade: 4 # taxas fixas de ida+volta ≤ 4% do trade
+  sizing:
+    mode: equityPct
+    equityPct: 8 # ponto ótimo da simulação: 6–12%; acima de 20% a quebra dispara
+    minSol: 0.02
+    maxSol: 1.5
+    throttleDrawdownPct: 25 # caiu 25% do pico → aposta pela metade
+    throttleFactor: 0.5
+  goal:
+    targetUsd: 1000
+    floorUsd: 40
+
+positions:
+  monitorIntervalMs: 2000
+  safetyRecheckIntervalMs: 45000
+
+execution:
+  orderTimeoutMs: 60000
+  sellSlippageStepsPct: [20, 35, 50]
+
+paper:
+  startingBalanceSol: 0.6 # ≈ $100 (ajuste ao preço do SOL)
+  feePct: 1
+  extraSlippagePct: 2
+  failureRate: 0.03
+
+dashboard:
+  enabled: true
+  port: 8787
+
+recorder:
+  enabled: true
+
+log:
+  level: info
+
+# ============================================================================
+#  Perfil de saída "moonbag" (repetido em cada estratégia):
+#   - stop -22/-25%            corta perdedores rápido
+#   - +100% vende 50%          recupera o capital (o resto vira "dinheiro da casa")
+#   - +300% vende mais 20%     realiza parte do runner
+#   - 30% restantes            ficam com trailing que alarga: 25% → 30% → 35% → 40%
+#   - break-even em +60%       um trade que já subiu bem não vira perda
+#   - até 45 min sem TP; até 6 h depois do 1º TP (moonbag)
+# ============================================================================
+strategies:
+  sniper:
+    enabled: false # disputa de latência com bots: ruim para banca pequena
+  migration:
+    enabled: false # a maioria despenca logo após migrar → use "survivor"
+  dipBuy:
+    enabled: false
+
+  # Sobrevivente pós-migração (30 min–6 h depois de graduar).
+  survivor:
+    enabled: true
+    sizeMultiplier: 1.0
+    maxOpenPositions: 2
+    priorityFeeSol: 0.0002
+    tipFeeSol: 0.0002
+    slippagePct: 15
+    minSlippagePct: 4
+    minScore: 55
+    klineMinScore: 55
+    minMinutesSinceOpen: 30
+    maxMinutesSinceOpen: 360
+    minAthRetracePct: 15
+    maxAthRetracePct: 55
+    minHolders: 500
+    minLiquidityUsd: 30000
+    minVolume1hUsd: 40000
+    minBuySellRatio: 1.1
+    minSmartDegenCount: 2
+    exit: &moonbag
+      stopLossPct: 22
+      takeProfits:
+        - { atPct: 100, sellPct: 50 }
+        - { atPct: 300, sellPct: 20 }
+      trailing:
+        enabled: true
+        activateAtPct: 50
+        drawdownPct: 25
+        tiers:
+          - { atPct: 100, drawdownPct: 30 }
+          - { atPct: 300, drawdownPct: 35 }
+          - { atPct: 700, drawdownPct: 40 }
+      breakEvenAtPct: 60
+      breakEvenBufferPct: 5
+      maxHoldMin: 45
+      maxHoldAfterTpMin: 360
+      staleAfterMin: 12
+      staleMinGainPct: 8
+      exitOnSafetyFail: true
+
+  # Confluência de smart money + KOL no feed de sinais, sem perseguir o preço.
+  smartSignal:
+    enabled: true
+    sizeMultiplier: 1.0
+    maxOpenPositions: 2
+    priorityFeeSol: 0.0003
+    tipFeeSol: 0.0003
+    slippagePct: 18
+    minScore: 55
+    signalTypes: [12, 20]
+    minSignalCount: 3
+    maxSignalAgeSec: 240
+    maxChaseMultiple: 1.5
+    minMarketCapUsd: 20000
+    maxMarketCapUsd: 2000000
+    minLiquidityUsd: 15000
+    minHolders: 200
+    exit:
+      <<: *moonbag
+      stopLossPct: 25
+
+  # Bonding curve 85%+ com volume — tamanho menor (mais arriscada).
+  graduation:
+    enabled: true
+    sizeMultiplier: 0.6
+    maxOpenPositions: 1
+    priorityFeeSol: 0.00025 # aposta menor → taxa menor para caber no limite de 4%
+    tipFeeSol: 0.00025
+    slippagePct: 20
+    minScore: 60
+    minProgress: 0.88
+    maxProgress: 0.985
+    minHolders: 150
+    minVolume1hUsd: 25000
+    minBuySellRatio: 1.25
+    minSmartDegenCount: 1
+    safety:
+      minLiquidityUsd: 0 # liquidez da bonding curve não é comparável à de pool
+    exit:
+      <<: *moonbag
+      stopLossPct: 25
+      maxHoldMin: 30
+
+  # Ranking hot de 1m — só com confirmação do gráfico.
+  momentum:
+    enabled: true
+    sizeMultiplier: 0.7
+    maxOpenPositions: 1
+    priorityFeeSol: 0.0002
+    tipFeeSol: 0.0002
+    slippagePct: 15
+    minScore: 60
+    klineMinScore: 60
+    interval: "1m"
+    minPriceChange1mPct: 4
+    maxPriceChange1mPct: 30
+    minPriceChange5mPct: 0
+    maxPriceChange1hPct: 300
+    minVolumeUsd: 15000
+    minBuySellRatio: 1.4
+    minLiquidityUsd: 25000
+    minHolders: 300
+    exit:
+      <<: *moonbag
+      stopLossPct: 18
+      maxHoldMin: 30
+      staleAfterMin: 8
+
+  # Aumento de carteiras smart money — complementa o smartSignal.
+  smartMoney:
+    enabled: true
+    sizeMultiplier: 0.7
+    maxOpenPositions: 1
+    priorityFeeSol: 0.0002
+    tipFeeSol: 0.0002
+    slippagePct: 15
+    minScore: 60
+    minSmartDegenCount: 4
+    minSmartIncrease: 2
+    lookbackSec: 300
+    minSmartOnFirstSeen: 8
+    minLiquidityUsd: 25000
+    maxMarketCapUsd: 2000000
+    exit: *moonbag

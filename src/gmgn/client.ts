@@ -14,6 +14,7 @@ export const ROUTE_WEIGHTS: Record<string, number> = {
   "/v1/token/pool_info": 1,
   "/v1/user/info": 1,
   "/v1/user/wallet_token_balance": 2,
+  "/v1/user/created_tokens": 2,
   "/v1/trade/quote": 10,
   "/v1/trade/swap": 10,
   "/v1/trade/query_order": 5,
@@ -125,6 +126,31 @@ export class GmgnClient {
 
   getTokenSecurity(chain: string, address: string, priority = Priority.Buy) {
     return this.request<Record<string, unknown>>({ method: "GET", path: "/v1/token/security", query: { chain, address }, priority });
+  }
+
+  /** Feed de sinais (smart money, KOL, bundlers vendendo...). */
+  getSignals(chain: string, groups: Array<Record<string, unknown>>) {
+    return this.request<unknown>({ method: "POST", path: "/v1/market/token_signal", body: { chain, groups }, idempotent: true });
+  }
+
+  /** Histórico de tokens criados por uma carteira (dev). */
+  getCreatedTokens(chain: string, wallet: string, priority = Priority.Buy) {
+    return this.request<Record<string, unknown>>({
+      method: "GET",
+      path: "/v1/user/created_tokens",
+      query: { chain, wallet_address: wallet },
+      priority,
+    });
+  }
+
+  /** Candles OHLCV. `fromMs`/`toMs` em milissegundos. */
+  getKline(chain: string, address: string, resolution: string, fromMs: number, toMs: number, priority = Priority.Buy) {
+    return this.request<{ list?: unknown[] } | unknown[]>({
+      method: "GET",
+      path: "/v1/market/token_kline",
+      query: { chain, address, resolution, from: fromMs, to: toMs },
+      priority,
+    });
   }
 
   getUserInfo() {

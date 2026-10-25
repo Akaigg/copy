@@ -8,7 +8,9 @@ import { errMsg, fmtSol, fmtUsd, fromRaw, SOL_MINT } from "./core/utils.js";
 import { startDashboard } from "./dashboard/server.js";
 import { Engine } from "./engine.js";
 import { checkSafety, mergeSafety } from "./filters/safety.js";
+import { readFileSync } from "node:fs";
 import { runReplay } from "./replay.js";
+import { bootstrapSampler, bucketSampler, returnsFromTrades, SCENARIOS, simulate, type Sampler } from "./simulate.js";
 import { buildRuntime, makeClient, makeLogger } from "./runtime.js";
 import { ageSec } from "./scanner/normalize.js";
 import { TokenStore } from "./scanner/tokenStore.js";
@@ -28,12 +30,18 @@ Comandos:
   status               mostra posições abertas e resultados
   sell-all             vende todas as posições abertas (com o robô parado)
   replay <arquivo|dir> backtest sobre dados gravados em data/recordings
+  simulate             Monte Carlo: chance real de ir de $start a $target (ver --help abaixo)
 
 Opções:
   --config <arquivo>   caminho do config (padrão: config/config.yaml)
   --mode paper|live    sobrescreve o modo do config
   --limit <n>          (scan) quantos tokens mostrar
   --verbose            (scan) mostra motivos de reprovação
+
+Opções do simulate:
+  --trades <arquivo>   reamostra seus trades reais (ex.: data/paper/trades.jsonl) — recomendado
+  --scenario <nome>    pessimista | equilibrado | otimista (hipotéticos, só ilustram a matemática)
+  --start 100 --target 1000 --floor 40 --bet 6 --fee-usd 0.3 --runs 5000 --max-trades 600
 `;
 
 function parseArgs(argv: string[]) {
@@ -57,7 +65,11 @@ function load(args: Record<string, string | boolean>) {
   const overrides: Partial<Config> = {};
   if (args.mode === "paper" || args.mode === "live") overrides.mode = args.mode;
   else if (args.mode) throw new Error("--mode deve ser paper ou live");
-  return loadConfig(typeof args.config === "string" ? args.config : undefined, overrides);
+  const loaded = loadConfig(typeof args.config === "string" ? args.config : undefined, overrides);
+  if (loaded.unknownKeys.length) {
+    console.error(`⚠ Chaves desconhecidas no config (ignoradas — erro de digitação?): ${loaded.unknownKeys.join(", ")}`);
+  }
+  return loaded;
 }
 
 async function cmdInit() {
@@ -158,9 +170,13 @@ async function cmdScan(args: Record<string, string | boolean>) {
       `${hits.length ? "🟢" : "⚪"} ${s.symbol.padEnd(12).slice(0, 12)} ${s.address.slice(0, 6)}… idade ${ageStr.padStart(5)} mcap ${fmtUsd(s.marketCapUsd).padStart(7)} liq ${fmtUsd(s.liquidityUsd).padStart(7)} holders ${String(s.holderCount ?? "?").padStart(5)} [${s.sources.join(",")}] ${hits.join(" ")}`,
     );
     if (verbose && !hits.length) {
-      const safetyFail = results[0]?.safety.failures ?? [];
-      if (safetyFail.length) console.log(`     segurança: ${safetyFail.join("; ")}`);
-      for (const r of results) if (r.ev.rejects.length) console.log(`     ${r.st.id}: ${r.ev.rejects.slice(0, 3).join("; ")}`);
+      for (const r of results) {
+        const why: string[] = [];
+        if (!r.safety.ok) why.push(`segurança: ${r.safety.failures.slice(0, 3).join("; ")}`);
+        if (r.ev.rejects.length) why.push(r.ev.rejects.slice(0, 3).join("; "));
+        else if (r.ev.score < r.st.cfg.minScore) why.push(`score ${r.ev.score} < mínimo ${r.st.cfg.minScore}`);
+        if (why.length) console.log(`     ${r.st.id}: ${why.join(" | ")}`);
+      }
     }
   }
 }
@@ -209,6 +225,13 @@ async function cmdStatus(args: Record<string, string | boolean>) {
   if (cfg.mode === "paper") console.log(`Saldo paper: ${fmtSol(st.paperBalanceSol)}`);
   const d = st.daily;
   console.log(`Hoje (${d.date}): ${fmtSol(d.realizedPnlSol)} | ${d.trades} trades | ${d.wins}✅ ${d.losses}❌`);
+  if (st.equity.lastUsd > 0) {
+    const goal = cfg.risk.goal.targetUsd;
+    const prog = goal > 0 ? ` | meta $${goal} (${Math.min(100, (st.equity.lastUsd / goal) * 100).toFixed(1)}%)` : "";
+    console.log(`Patrimônio: $${st.equity.lastUsd.toFixed(2)} (${fmtSol(st.equity.lastSol)}) | pico ${fmtSol(st.equity.peakSol)}${prog}`);
+    if (st.equity.goalReachedAt !== undefined) console.log("🏁 META ATINGIDA — compras encerradas");
+    if (st.equity.floorHitAt !== undefined) console.log("🧱 Abaixo do piso — compras encerradas");
+  }
   const t = st.totals;
   console.log(`Total: ${fmtSol(t.realizedPnlSol)} | ${t.trades} trades | acerto ${t.trades ? Math.round((t.wins / t.trades) * 100) : 0}%`);
 
@@ -271,6 +294,62 @@ async function cmdReplay(pos: string[], args: Record<string, string | boolean>) 
   console.log(`Detalhes: ${r.stateDir}/trades.jsonl`);
 }
 
+async function cmdSimulate(args: Record<string, string | boolean>) {
+  const n = (k: string, d: number) => (typeof args[k] === "string" ? Number(args[k]) : d);
+  let sample: Sampler;
+  let label: string;
+  let feeDefault = 0.3;
+  if (typeof args.trades === "string") {
+    const rets = returnsFromTrades(readFileSync(args.trades, "utf8").split("\n"));
+    if (rets.length < 30) console.log(`⚠ Só ${rets.length} trades fechados — amostra pequena, resultado pouco confiável (ideal: 100+).`);
+    sample = bootstrapSampler(rets);
+    label = `seus ${rets.length} trades (${args.trades})`;
+    feeDefault = 0; // o PnL registrado já desconta as taxas
+  } else {
+    const name = typeof args.scenario === "string" ? args.scenario : "equilibrado";
+    const sc = SCENARIOS[name];
+    if (!sc) throw new Error(`cenário desconhecido: ${name} (use ${Object.keys(SCENARIOS).join(", ")})`);
+    sample = bucketSampler(sc.buckets);
+    label = `cenário HIPOTÉTICO "${name}" — ${sc.desc}`;
+  }
+  const base = {
+    startUsd: n("start", 100),
+    targetUsd: n("target", 1000),
+    floorUsd: n("floor", 40),
+    betPct: n("bet", 6),
+    minBetUsd: n("min-bet", 3),
+    feeUsd: n("fee-usd", feeDefault),
+    maxTrades: n("max-trades", 600),
+    runs: n("runs", 5000),
+  };
+  const pct = (v: number) => `${(v * 100).toFixed(1)}%`.padStart(6);
+  console.log(`\nSimulação Monte Carlo — ${label}`);
+  console.log(
+    `$${base.startUsd} → meta $${base.targetUsd} | piso $${base.floorUsd} | taxa fixa $${base.feeUsd}/trade | até ${base.maxTrades} trades | ${base.runs} rodadas\n`,
+  );
+  console.log(" aposta  | atinge meta | quebra (piso) | nem um nem outro | trades até a meta (mediana) | EV/trade | final mediano");
+  console.log("---------+-------------+---------------+------------------+-----------------------------+----------+--------------");
+  const bets = [...new Set([2, 4, base.betPct, 8, 12, 20, 35])].sort((a, b) => a - b);
+  for (const b of bets) {
+    const r = simulate(sample, { ...base, betPct: b });
+    const mark = b === base.betPct ? "→" : " ";
+    console.log(
+      `${mark}${String(b).padStart(5)}%  |   ${pct(r.pTarget)}    |    ${pct(r.pRuin)}     |      ${pct(r.pUnfinished)}      |            ${String(r.medianTradesToTarget ?? "-").padStart(5)}            | ${r.evPct >= 0 ? "+" : ""}${r.evPct.toFixed(1).padStart(5)}%  | $${r.medianFinal.toFixed(0)}`,
+    );
+  }
+  const main = simulate(sample, base);
+  console.log(`\nCom ${base.betPct}% por trade: crescimento log esperado ${(main.logGrowth * 100).toFixed(3)}% por trade.`);
+  if (main.evPct <= 0) {
+    console.log("❌ Expectativa NEGATIVA: nenhum tamanho de aposta transforma isso em lucro — só muda a velocidade da perda.");
+  } else if (main.logGrowth <= 0) {
+    console.log("⚠ Expectativa positiva, mas a aposta está grande demais para a volatilidade (arrasto de volatilidade): reduza --bet.");
+  } else {
+    const need = Math.log(base.targetUsd / base.startUsd) / main.logGrowth;
+    console.log(`Trades necessários em média para ${(base.targetUsd / base.startUsd).toFixed(0)}x: ~${need.toFixed(0)}.`);
+  }
+  console.log("Resultados passados/hipotéticos não garantem resultados futuros.");
+}
+
 async function main() {
   const { cmd, pos, args } = parseArgs(process.argv.slice(2));
   switch (cmd) {
@@ -290,6 +369,8 @@ async function main() {
       return cmdSellAll(args);
     case "replay":
       return cmdReplay(pos, args);
+    case "simulate":
+      return cmdSimulate(args);
     default:
       console.log(HELP);
   }
