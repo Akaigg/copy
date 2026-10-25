@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+.env
+*.pem
+config/config.yaml
+STOP
+keys/

@@ -1,0 +1,252 @@
+# ============================================================================
+#  GMGN Hot Bot — configuração
+#  Copie para config/config.yaml (ou rode `npm run dev -- init`) e ajuste.
+#  Qualquer campo omitido usa o padrão interno (veja src/config/schema.ts).
+#
+#  Unidades:  *Pct = porcentagem (25 = 25%)   *Rate/*Ratio = fração 0–1
+#             *Sol = SOL   *Usd = dólares   *Ms = milissegundos   *Min = minutos
+# ============================================================================
+
+# paper = simulação com preços reais (padrão, recomendado para começar)
+# live  = ordens REAIS na carteira vinculada à sua API key da GMGN
+mode: paper
+
+gmgn:
+  # free (5 req/s) | plus (20) | pro (50). Swap pesa 10 => live precisa de plus/pro.
+  plan: free
+  rateSafetyFactor: 0.8 # usa 80% do limite para não tomar ban
+
+live:
+  # Precisa ser true para o modo live funcionar.
+  acknowledgeRisk: false
+
+scanner:
+  intervalMs: 4000
+  trenches: # lançamentos dos launchpads (Pump.fun, letsbonk, ...)
+    enabled: true
+    types: [new_creation, near_completion, completed]
+    platforms: [] # vazio = todos; ex.: ["Pump.fun", "letsbonk"]
+    limit: 50
+    serverFilters: # filtros aplicados no servidor da GMGN
+      max_rug_ratio: 0.5
+  trending: # ranking "hot" da GMGN
+    enabled: true
+    intervals: ["1m", "5m", "1h"]
+    limit: 50
+    filters: ["renounced", "frozen"]
+    maxCreatedMin: 1440 # só tokens com até 24h de vida
+
+# ---------------------------------------------------------------- segurança
+safety:
+  requireMintRenounced: true
+  requireFreezeRenounced: true
+  rejectHoneypot: true
+  rejectWashTrading: true
+  maxRugRatio: 0.3
+  maxTop10HolderRate: 0.35
+  maxBundlerRate: 0.3
+  maxInsiderRate: 0.25
+  maxDevHoldRate: 0.1
+  maxTop70SniperHoldRate: 0.3
+  maxBuyTax: 0.05
+  maxSellTax: 0.05
+  minLiquidityUsd: 5000
+  minHolders: 10
+  requireSocial: false
+  strictMissing: false # true = rejeita quando a GMGN não informa o dado
+  blacklistTokens: []
+  blacklistCreators: []
+verifySecurityBeforeBuy: true # rechecagem /token/security antes de cada compra
+
+# ---------------------------------------------------------------- risco
+risk:
+  maxOpenPositions: 6
+  maxTotalExposureSol: 0.5 # soma das entradas abertas
+  maxPositionPctOfBalance: 10
+  minSolReserve: 0.05 # nunca usa esse SOL (taxas)
+  dailyLossLimitSol: 0.3 # para de comprar no dia
+  dailyProfitTargetSol: 0 # 0 = sem meta
+  maxConsecutiveLosses: 4
+  pauseAfterLossesMin: 30
+  tokenCooldownMin: 240
+  maxBuysPerHour: 12
+  blacklistCreatorOnLossPct: 50 # bloqueia o dev se o token dele der -50%
+
+positions:
+  monitorIntervalMs: 2500
+  reconcileIntervalMs: 60000 # live: confere saldo real da carteira
+  safetyRecheckIntervalMs: 60000
+
+execution:
+  orderTimeoutMs: 60000
+  sellSlippageStepsPct: [25, 40, 60] # escalonamento em vendas que falham
+
+paper:
+  startingBalanceSol: 2
+  feePct: 1
+  extraSlippagePct: 1.5
+  failureRate: 0.02
+
+notifications:
+  telegram:
+    enabled: false # defina TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no .env
+    events: [buy, sell, error, risk, daily, info]
+
+dashboard:
+  enabled: true
+  host: 127.0.0.1
+  port: 8787
+  authToken: "" # defina para habilitar os botões pausar/vender tudo
+
+recorder:
+  enabled: true # grava dados para `replay`
+
+log:
+  level: info # debug mostra cada sinal recusado
+
+sellAllOnShutdown: false
+
+# ============================================================================
+#  ESTRATÉGIAS — cada uma tem tamanho de compra, taxas e regras de saída próprias.
+#  exit:
+#    stopLossPct        vende tudo se cair X% da entrada
+#    takeProfits        vendas parciais: atPct = ganho, sellPct = % da posição original
+#    trailing           após +activateAtPct, vende tudo se recuar drawdownPct da máxima
+#    breakEvenAtPct     após +X%, o stop sobe para a entrada (+breakEvenBufferPct)
+#    maxHoldMin         tempo máximo na posição
+#    staleAfterMin      sai se após X min o pico não passou de staleMinGainPct
+# ============================================================================
+strategies:
+  # Tokens recém-criados na bonding curve com tração nos primeiros minutos.
+  sniper:
+    enabled: true
+    buySol: 0.03
+    maxOpenPositions: 3
+    slippagePct: 30
+    priorityFeeSol: 0.001
+    tipFeeSol: 0.001
+    minScore: 55
+    minAgeSec: 20
+    maxAgeSec: 300
+    minHolders: 25
+    minSwaps1m: 15
+    minBuySellRatio: 1.2
+    minMarketCapUsd: 6000
+    maxMarketCapUsd: 35000
+    minVolume1hUsd: 3000
+    exit:
+      stopLossPct: 30
+      takeProfits:
+        - { atPct: 60, sellPct: 40 }
+        - { atPct: 150, sellPct: 30 }
+        - { atPct: 400, sellPct: 20 }
+      trailing: { enabled: true, activateAtPct: 50, drawdownPct: 25 }
+      breakEvenAtPct: 40
+      maxHoldMin: 30
+      staleAfterMin: 6
+      staleMinGainPct: 10
+
+  # Bonding curve 85%+ — entra antes da migração para a DEX.
+  graduation:
+    enabled: true
+    buySol: 0.05
+    maxOpenPositions: 2
+    slippagePct: 25
+    minScore: 50
+    minProgress: 0.85
+    maxProgress: 0.985
+    minHolders: 80
+    minVolume1hUsd: 15000
+    exit:
+      stopLossPct: 20
+      takeProfits:
+        - { atPct: 40, sellPct: 50 }
+        - { atPct: 100, sellPct: 30 }
+      trailing: { enabled: true, activateAtPct: 30, drawdownPct: 18 }
+      breakEvenAtPct: 25
+      maxHoldMin: 45
+      staleAfterMin: 15
+      staleMinGainPct: 8
+
+  # Acabou de migrar para a DEX com liquidez e volume saudáveis.
+  migration:
+    enabled: true
+    buySol: 0.05
+    maxOpenPositions: 2
+    slippagePct: 20
+    minScore: 50
+    maxMinutesSinceOpen: 15
+    minLiquidityUsd: 15000
+    minHolders: 150
+    minVolume1hUsd: 20000
+    exit:
+      stopLossPct: 20
+      takeProfits:
+        - { atPct: 50, sellPct: 40 }
+        - { atPct: 120, sellPct: 30 }
+      trailing: { enabled: true, activateAtPct: 35, drawdownPct: 20 }
+      maxHoldMin: 60
+
+  # Ranking hot de 1m: alta forte + pressão compradora, sem perseguir velas esticadas.
+  momentum:
+    enabled: true
+    buySol: 0.04
+    maxOpenPositions: 2
+    slippagePct: 20
+    minScore: 55
+    interval: "1m"
+    minPriceChange1mPct: 5
+    maxPriceChange1mPct: 45
+    minVolumeUsd: 8000
+    minBuySellRatio: 1.3
+    minLiquidityUsd: 10000
+    maxAgeHours: 24
+    exit:
+      stopLossPct: 15
+      takeProfits:
+        - { atPct: 30, sellPct: 50 }
+        - { atPct: 80, sellPct: 30 }
+      trailing: { enabled: true, activateAtPct: 20, drawdownPct: 12 }
+      breakEvenAtPct: 15
+      maxHoldMin: 30
+      staleAfterMin: 8
+      staleMinGainPct: 5
+
+  # Entra quando o número de carteiras smart money aumenta.
+  smartMoney:
+    enabled: true
+    buySol: 0.05
+    maxOpenPositions: 2
+    minScore: 50
+    minSmartDegenCount: 3
+    minSmartIncrease: 1
+    lookbackSec: 300
+    minSmartOnFirstSeen: 5
+    minLiquidityUsd: 10000
+    maxMarketCapUsd: 1500000
+    exit:
+      stopLossPct: 25
+      takeProfits:
+        - { atPct: 50, sellPct: 40 }
+        - { atPct: 150, sellPct: 30 }
+      trailing: { enabled: true, activateAtPct: 40, drawdownPct: 22 }
+      maxHoldMin: 90
+
+  # Token hot que subiu forte em 1h, corrigiu em 5m e começa a repicar.
+  dipBuy:
+    enabled: false # desligada por padrão: mais arriscada (pega faca caindo)
+    buySol: 0.03
+    maxOpenPositions: 1
+    minScore: 55
+    minPriceChange1hPct: 80
+    minPriceChange5mPct: -35
+    maxPriceChange5mPct: -12
+    minPriceChange1mPct: 0
+    minLiquidityUsd: 20000
+    exit:
+      stopLossPct: 15
+      takeProfits:
+        - { atPct: 25, sellPct: 50 }
+        - { atPct: 60, sellPct: 30 }
+      trailing: { enabled: true, activateAtPct: 20, drawdownPct: 12 }
+      maxHoldMin: 40

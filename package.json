@@ -1,0 +1,36 @@
+{
+  "name": "gmgn-hot-bot",
+  "version": "1.0.0",
+  "description": "Robô de compra e venda automatizada para memecoins recém-lançadas (hot) na GMGN, com múltiplas estratégias, gestão de risco e modo paper trading.",
+  "type": "module",
+  "private": true,
+  "main": "dist/index.js",
+  "bin": {
+    "gmgn-bot": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js run",
+    "dev": "tsx src/index.ts",
+    "paper": "tsx src/index.ts run --mode paper",
+    "live": "tsx src/index.ts run --mode live",
+    "scan": "tsx src/index.ts scan",
+    "status": "tsx src/index.ts status",
+    "replay": "tsx src/index.ts replay",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "yaml": "^2.9.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}
